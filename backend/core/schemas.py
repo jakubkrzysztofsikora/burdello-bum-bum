@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 # ===========================================================================
@@ -44,7 +44,9 @@ class SourceResponse(BaseModel):
     url: str | None
     language: str | None
     duration_seconds: int | None
-    metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -82,7 +84,9 @@ class MessageResponse(BaseModel):
     content: str
     timestamp_seconds: float | None
     sequence: int
-    metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -112,7 +116,9 @@ class TranscriptResponse(BaseModel):
     title: str | None
     language: str | None
     status: str
-    metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -167,7 +173,9 @@ class ProjectResponse(BaseModel):
     name: str
     description: str | None
     status: str
-    metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -229,7 +237,9 @@ class TaskResponse(BaseModel):
     priority: str | None
     due_date: datetime | None
     source_transcript_id: uuid.UUID | None
-    metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -270,7 +280,9 @@ class ArtifactResponse(BaseModel):
     name: str
     content: dict[str, Any]
     source_transcript_id: uuid.UUID | None
-    metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -351,7 +363,9 @@ class MiningResultResponse(BaseModel):
     miner_type: str
     result_data: dict[str, Any]
     confidence: float | None
-    metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -371,7 +385,9 @@ class TranscriptRelationshipResponse(BaseModel):
     related_transcript_id: uuid.UUID
     relationship_type: str
     confidence: float | None
-    metadata: dict[str, Any] | None
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
     created_at: datetime
     updated_at: datetime
 
