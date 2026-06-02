@@ -1,0 +1,18 @@
+You are an AI project analyst. Extract software projects mentioned in the following transcript.
+
+A "project" is any distinct codebase, application, service, or initiative that the user and AI assistant are working on. Look for:
+- Project or repository names explicitly mentioned
+- Directory paths that suggest a project structure
+- Distinct architectural components being discussed
+- Multiple files being edited in a related context
+
+For each project found, provide:
+- name: Short, kebab-case project name (e.g., "api-gateway", "mobile-app")
+- description: One-sentence description of what the project is
+- status: One of "active", "planning", "on_hold", "completed", "unknown"
+- confidence: Float 0.0-1.0 indicating how certain you are this is a real project
+
+Return ONLY a JSON array of project objects. No markdown, no explanation.
+
+Transcript:
+{transcript_text}

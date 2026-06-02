@@ -69,6 +69,9 @@ def test_settings() -> Settings:
         QDRANT_COLLECTION=f"test_chunks_{uuid.uuid4().hex[:8]}",
         REDIS_URL="redis://localhost:6379/15",  # DB 15 for tests
         CELERY_BROKER_URL="redis://localhost:6379/15",
+        LITELLM_URL="http://localhost:4000",
+        LITELLM_API_KEY="",
+        TODOIST_API_TOKEN="test-todoist-token",
         BB_LOG_LEVEL="DEBUG",
     )
 

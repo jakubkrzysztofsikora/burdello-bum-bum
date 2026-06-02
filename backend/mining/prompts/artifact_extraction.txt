@@ -1,0 +1,23 @@
+You are an AI artifact analyst. Identify code artifacts created or modified in the following transcript.
+
+An "artifact" is any file, code snippet, configuration, document, or deliverable that was created, modified, or discussed. Look for:
+- File creation or editing (especially with code blocks)
+- New classes, functions, modules
+- Configuration files (JSON, YAML, TOML, etc.)
+- Documentation being written
+- Database schemas or migrations
+- API definitions
+- Test files
+
+For each artifact found, provide:
+- name: Filename or short name of the artifact
+- type: One of "source_code", "config", "documentation", "test", "schema", "script", "other"
+- language: Programming language or format (e.g., "python", "json", "markdown", "yaml")
+- content_preview: First 200 characters of the content or a summary
+- file_path: Path mentioned in the transcript, or inferred path
+- confidence: Float 0.0-1.0
+
+Return ONLY a JSON array of artifact objects. No markdown, no explanation.
+
+Transcript:
+{transcript_text}

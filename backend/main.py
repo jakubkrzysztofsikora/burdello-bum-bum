@@ -47,12 +47,15 @@ search_engine = HybridSearchEngine(
 def _register_routers(app: FastAPI) -> None:
     """Attach all API routers to the FastAPI application."""
     from backend.api.routers.artifacts import router as artifacts_router
+    from backend.api.routers.ingest import router as ingest_router
+    from backend.api.routers.mining import router as mining_router
     from backend.api.routers.projects import router as projects_router
     from backend.api.routers.search import router as search_router
     from backend.api.routers.skills import router as skills_router
     from backend.api.routers.sources import router as sources_router
     from backend.api.routers.stats import router as stats_router
     from backend.api.routers.tasks import router as tasks_router
+    from backend.api.routers.todoist import router as todoist_router
     from backend.api.routers.transcripts import router as transcripts_router
 
     app.include_router(sources_router, prefix="/api/v1")
@@ -63,6 +66,9 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(search_router, prefix="/api/v1")
     app.include_router(skills_router, prefix="/api/v1")
     app.include_router(stats_router, prefix="/api/v1")
+    app.include_router(ingest_router, prefix="/api/v1")
+    app.include_router(mining_router, prefix="/api/v1")
+    app.include_router(todoist_router, prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------

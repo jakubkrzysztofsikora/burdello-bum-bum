@@ -1,0 +1,12 @@
+{"event_type": "StatusUpdate", "status": "connected", "timestamp": 1737632400}
+{"event_type": "user_message", "role": "user", "content": "Explain quantum computing in simple terms", "timestamp": 1737632405}
+{"event_type": "assistant_message", "role": "assistant", "model": "kimi-k2-72b", "content": "Quantum computing is a new type of computing that uses quantum mechanics to process information. Unlike classical computers that use bits (0 or 1), quantum computers use qubits which can be 0, 1, or both at the same time.", "timestamp": 1737632410}
+{"event_type": "TextPart", "text": "This property is called ", "timestamp": 1737632411}
+{"event_type": "TextPart", "text": "superposition.", "timestamp": 1737632412}
+{"event_type": "ThinkPart", "thinking": "The user asked for a simple explanation. I should avoid jargon and use analogies. The spinning coin analogy works well here.", "timestamp": 1737632413}
+{"event_type": "TextPart", "text": " Think of it like a spinning coin — while it's in the air, it's neither heads nor tails, but some combination of both.", "timestamp": 1737632415}
+{"event_type": "user_message", "role": "user", "content": "Can you search for recent papers on quantum error correction?", "timestamp": 1737632420}
+{"event_type": "ToolCall", "tool_name": "web_search", "arguments": {"query": "quantum error correction papers 2024 2025"}, "tool_use_id": "tool_call_001", "timestamp": 1737632422}
+{"event_type": "ToolResult", "tool_use_id": "tool_call_001", "result": "Found 3 recent papers:\n1. 'Surface Code Quantum Error Correction' (Nature, 2024)\n2. 'Logical Qubits with Superconducting Circuits' (Science, 2025)\n3. 'Error Mitigation in NISQ Devices' (arXiv:2501.xxxxx)", "timestamp": 1737632425}
+{"event_type": "assistant_message", "role": "assistant", "model": "kimi-k2-72b", "content": "I found 3 recent papers on quantum error correction:\n\n1. **'Surface Code Quantum Error Correction'** — published in *Nature* (2024)\n2. **'Logical Qubits with Superconducting Circuits'** — published in *Science* (2025)\n3. **'Error Mitigation in NISQ Devices'** — arXiv preprint (2025)\n\nWould you like me to summarize any of these?", "timestamp": 1737632430}
+{"event_type": "StatusUpdate", "status": "disconnected", "timestamp": 1737632440}

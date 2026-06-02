@@ -1,0 +1,26 @@
+You are an AI task analyst. Extract actionable tasks from the following transcript.
+
+A "task" is any work item, todo, action item, or deliverable mentioned or implied. Look for:
+- Explicit todo items ("I need to...", "We should...", "TODO:", "FIXME:")
+- Code changes requested or planned
+- Bug fixes mentioned
+- Documentation to be written
+- Tests to be added
+- Refactoring work
+- Deployment or infrastructure tasks
+
+For each task found, provide:
+- title: Short, actionable task title (max 10 words)
+- description: One or two sentences describing the task
+- status: One of "todo", "in_progress", "done", "cancelled", "blocked"
+- priority: One of "low", "medium", "high", "urgent"
+- confidence: Float 0.0-1.0
+
+If a project context is provided, relate tasks to that context when possible.
+
+Return ONLY a JSON array of task objects. No markdown, no explanation.
+
+Project Context: {project_context}
+
+Transcript:
+{transcript_text}

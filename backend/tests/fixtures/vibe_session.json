@@ -1,0 +1,32 @@
+{
+    "session_id": "vibe-sess-001",
+    "model": "gpt-4-turbo",
+    "created_at": "2025-02-20T10:15:00Z",
+    "ended_at": "2025-02-20T10:20:30Z",
+    "metadata": {
+        "project": "web-dashboard",
+        "version": "1.0.0"
+    },
+    "messages": [
+        {
+            "role": "user",
+            "content": "Create a React component for a data table with sorting and pagination",
+            "timestamp": "2025-02-20T10:15:05Z"
+        },
+        {
+            "role": "assistant",
+            "content": "I'll create a comprehensive React data table component with sorting and pagination.\n\n```jsx\nimport React, { useState, useMemo } from 'react';\n\nconst DataTable = ({ data, columns }) => {\n  const [sortColumn, setSortColumn] = useState(null);\n  const [sortDirection, setSortDirection] = useState('asc');\n  const [currentPage, setCurrentPage] = useState(1);\n  const pageSize = 10;\n\n  const sortedData = useMemo(() => {\n    if (!sortColumn) return data;\n    return [...data].sort((a, b) => {\n      const aVal = a[sortColumn];\n      const bVal = b[sortColumn];\n      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;\n      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;\n      return 0;\n    });\n  }, [data, sortColumn, sortDirection]);\n\n  const paginatedData = sortedData.slice(\n    (currentPage - 1) * pageSize,\n    currentPage * pageSize\n  );\n\n  return (\n    <div className=\"data-table\">\n      <table>\n        <thead>\n          <tr>\n            {columns.map(col => (\n              <th key={col.key} onClick={() => handleSort(col.key)}>\n                {col.title} {sortColumn === col.key && (sortDirection === 'asc' ? '▲' : '▼')}\n              </th>\n            ))}\n          </tr>\n        </thead>\n        <tbody>\n          {paginatedData.map((row, idx) => (\n            <tr key={idx}>\n              {columns.map(col => (\n                <td key={col.key}>{row[col.key]}</td>\n              ))}\n            </tr>\n          ))}\n        </tbody>\n      </table>\n    </div>\n  );\n};\n\nexport default DataTable;\n```",
+            "timestamp": "2025-02-20T10:15:30Z"
+        },
+        {
+            "role": "user",
+            "content": "Can you also add filtering functionality?",
+            "timestamp": "2025-02-20T10:18:00Z"
+        },
+        {
+            "role": "assistant",
+            "content": "Absolutely! I'll add a filter input and filter logic to the DataTable component.\n\n```jsx\nconst [filterText, setFilterText] = useState('');\n\nconst filteredData = useMemo(() => {\n  if (!filterText) return sortedData;\n  const lowerFilter = filterText.toLowerCase();\n  return sortedData.filter(row =>\n    columns.some(col =>\n      String(row[col.key]).toLowerCase().includes(lowerFilter)\n    )\n  );\n}, [sortedData, filterText, columns]);\n```\n\nAdd this input at the top of the component:\n```jsx\n<input\n  type=\"text\"\n  placeholder=\"Filter rows...\"\n  value={filterText}\n  onChange={(e) => { setFilterText(e.target.value); setCurrentPage(1); }}\n  className=\"filter-input\"\n/>\n```",
+            "timestamp": "2025-02-20T10:19:00Z"
+        }
+    ]
+}

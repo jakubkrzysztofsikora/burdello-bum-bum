@@ -1,0 +1,16 @@
+You are an AI completeness analyst. Review the following transcript and identify incomplete work items.
+
+Look for:
+- Tasks started but not finished
+- Code mentioned as needing changes but not yet changed
+- Tests referenced but not written
+- Documentation gaps
+- TODOs or FIXMEs left unresolved
+- Partial implementations
+- Architectural decisions deferred
+- Unanswered questions about implementation
+
+Return ONLY a JSON array of strings, where each string describes one incomplete work item. Be specific and actionable.
+
+Transcript:
+{transcript_text}

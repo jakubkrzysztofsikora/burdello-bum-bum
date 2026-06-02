@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     LITELLM_URL: str = "http://localhost:4000"
     LITELLM_API_KEY: str = ""
 
+    # --- Todoist ---
+    TODOIST_API_TOKEN: str = ""
+
     # --- Celery ---
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
 

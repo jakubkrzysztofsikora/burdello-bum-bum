@@ -1,0 +1,18 @@
+You are an AI status analyst. Infer the overall work status from the following transcript.
+
+Analyze the conversation to determine:
+1. What is the current phase of work? (planning, active development, debugging, review, deployment, maintenance)
+2. Is the work progressing, blocked, or complete?
+3. What blockers or issues are present, if any?
+
+Return a JSON object with:
+- overall_status: One of "planning", "in_progress", "review", "blocked", "completed", "unknown"
+- confidence: Float 0.0-1.0
+- reasoning: 1-3 sentences explaining your assessment
+- phase: The detected work phase
+- blockers: Array of blocker descriptions (empty if none)
+
+Return ONLY the JSON object. No markdown, no explanation.
+
+Transcript:
+{transcript_text}
