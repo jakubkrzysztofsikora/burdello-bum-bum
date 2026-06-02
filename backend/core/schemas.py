@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field
 
 
 # ===========================================================================
@@ -122,6 +122,12 @@ class TranscriptResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def project_name(self) -> str | None:
+        """Session/project name derived from the transcript (path-based)."""
+        return (self.metadata or {}).get("project_name")
+
 
 class TranscriptSummary(BaseModel):
     """Lightweight summary of a transcript for list views."""
@@ -132,7 +138,16 @@ class TranscriptSummary(BaseModel):
     title: str | None
     status: str
     message_count: int | None = None
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
     created_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def project_name(self) -> str | None:
+        """Session/project name derived from the transcript (path-based)."""
+        return (self.metadata or {}).get("project_name")
 
 
 class TranscriptListResponse(BaseModel):
@@ -176,8 +191,18 @@ class ProjectResponse(BaseModel):
     metadata: dict[str, Any] | None = Field(
         default=None, validation_alias=AliasChoices("metadata_", "metadata")
     )
+    # Populated by the list/detail endpoints (aggregated from tasks).
+    task_count: int = 0
+    completed_task_count: int = 0
     created_at: datetime
     updated_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def confidence(self) -> float | None:
+        """Mining confidence, lifted from metadata for the UI."""
+        val = (self.metadata or {}).get("confidence")
+        return float(val) if isinstance(val, (int, float)) else None
 
 
 class ProjectStats(BaseModel):
@@ -242,6 +267,13 @@ class TaskResponse(BaseModel):
     )
     created_at: datetime
     updated_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def confidence(self) -> float | None:
+        """Mining confidence, lifted from metadata for the UI."""
+        val = (self.metadata or {}).get("confidence")
+        return float(val) if isinstance(val, (int, float)) else None
 
 
 class TaskSummary(BaseModel):

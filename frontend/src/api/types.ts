@@ -31,9 +31,12 @@ export interface TranscriptDetail extends Transcript {
 
 export interface Artifact {
   id: string;
-  type: string;
+  project_id: string | null;
+  artifact_type: string;
   name: string;
-  content: string;
+  content: Record<string, unknown> | null;
+  source_transcript_id: string | null;
+  metadata: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -44,6 +47,7 @@ export interface Project {
   status: "active" | "completed" | "archived" | "abandoned";
   confidence: number;
   task_count: number;
+  completed_task_count: number;
   transcript_count: number;
   last_activity_at: string | null;
   created_at?: string | null;

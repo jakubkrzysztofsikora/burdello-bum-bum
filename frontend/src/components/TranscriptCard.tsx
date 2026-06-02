@@ -19,7 +19,7 @@ export function TranscriptCard({ transcript }: TranscriptCardProps) {
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2">
           <span className="truncate text-sm font-medium group-hover:text-bb-accent">
-            {transcript.project_name || "Untitled Session"}
+            {transcript.title || transcript.project_name || "Untitled Session"}
           </span>
           <StatusBadge status={transcript.status} />
           {transcript.has_mining_results && (
@@ -33,7 +33,9 @@ export function TranscriptCard({ transcript }: TranscriptCardProps) {
           </span>
           {transcript.started_at && (
             <span>
-              {formatDistanceToNow(new Date(transcript.started_at), { addSuffix: true })}
+              {formatDistanceToNow(new Date(transcript.started_at), {
+                addSuffix: true,
+              })}
             </span>
           )}
         </div>

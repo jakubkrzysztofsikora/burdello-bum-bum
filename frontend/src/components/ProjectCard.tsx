@@ -9,7 +9,7 @@ interface ProjectCardProps {
 }
 
 export function ProjectCard({ project }: ProjectCardProps) {
-  const completedTasks = 0;
+  const completedTasks = project.completed_task_count || 0;
   const totalTasks = project.task_count || 0;
   const progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
 
@@ -26,7 +26,9 @@ export function ProjectCard({ project }: ProjectCardProps) {
       </div>
 
       {project.description && (
-        <p className="mb-3 line-clamp-2 text-xs text-bb-muted">{project.description}</p>
+        <p className="mb-3 line-clamp-2 text-xs text-bb-muted">
+          {project.description}
+        </p>
       )}
 
       <div className="mb-2">
@@ -52,7 +54,9 @@ export function ProjectCard({ project }: ProjectCardProps) {
         {project.last_activity_at && (
           <span className="ml-auto flex items-center gap-1">
             <Clock size={12} />
-            {formatDistanceToNow(new Date(project.last_activity_at), { addSuffix: true })}
+            {formatDistanceToNow(new Date(project.last_activity_at), {
+              addSuffix: true,
+            })}
           </span>
         )}
       </div>

@@ -6,6 +6,7 @@ with filtering, sorting, and pagination.
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -24,6 +25,57 @@ from backend.core.schemas import (
 )
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
+
+
+def _clean_project_name(raw: str | None) -> str | None:
+    """Turn a path-encoded project name into a readable repo name.
+
+    ``-Users-jakubsikora-Repos-personal-sikoras-chat`` -> ``sikoras-chat``.
+    """
+    if not raw:
+        return None
+    name = raw
+    if "-Repos-" in name:
+        name = name.split("-Repos-")[-1]
+        # drop the org segment (e.g. personal-, circit-)
+        parts = name.split("-", 1)
+        if len(parts) == 2 and parts[0] in {"personal", "circit", "work"}:
+            name = parts[1]
+    name = name.lstrip("-").strip()
+    # Bare home paths aren't useful project names.
+    if not name or name.startswith("Users"):
+        return None
+    return name
+
+
+def _derive_title(transcript: Any, first_user_message: str | None) -> str:
+    """Derive a human-readable session title from the transcript content.
+
+    Prefers the opening user prompt; falls back to a cleaned project/repo name,
+    then the filename.
+    """
+    text = (first_user_message or "").strip()
+    # Codex stores structured content as a stringified list of ContentBlocks;
+    # pull the readable text="..." segments out of it.
+    if text.startswith("[") and "text=" in text:
+        text = " ".join(re.findall(r'text=["\']([^"\']{4,}?)["\']', text))
+    text = re.sub(r"<[^>]+>", " ", text)  # command/tool tags
+    text = re.sub(r"```[a-zA-Z0-9]*", " ", text)  # code fences
+    text = text.replace("\\n", " ").replace("\n", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    # Use the prompt only if it reads like a real request (not env dumps or
+    # agent boilerplate).
+    looks_clean = len(text) >= 8 and not re.match(
+        r"(?i)^(# ?AGENTS|permissions|you are |/Users/|zsh\b|env\b)", text
+    )
+    if looks_clean:
+        return text[:90] + ("…" if len(text) > 90 else "")
+
+    pn = _clean_project_name((transcript.metadata_ or {}).get("project_name"))
+    if pn:
+        return pn
+    title = (transcript.title or "").rsplit(".", 1)[0]
+    return title or "Untitled session"
 
 
 def _parse_sort(sort: str) -> tuple[str, bool]:
@@ -107,21 +159,43 @@ async def list_transcripts(
     base_query = base_query.offset(skip).limit(limit)
 
     result = await db.execute(base_query)
-    transcripts = result.scalars().all()
+    transcripts = list(result.scalars().all())
+    transcript_ids = [t.id for t in transcripts]
 
-    # Build summary items with message counts
-    items: list[dict[str, Any]] = []
-    for transcript in transcripts:
-        msg_count_result = await db.execute(
-            select(func.count(Message.id)).where(Message.transcript_id == transcript.id)
+    # Batch: message count per transcript.
+    msg_counts: dict[Any, int] = {}
+    # Batch: first user message per transcript (for a derived session title).
+    first_user_msg: dict[Any, str] = {}
+    if transcript_ids:
+        cnt_rows = await db.execute(
+            select(Message.transcript_id, func.count(Message.id))
+            .where(Message.transcript_id.in_(transcript_ids))
+            .group_by(Message.transcript_id)
         )
-        message_count = msg_count_result.scalar() or 0
+        msg_counts = {tid: int(c) for tid, c in cnt_rows.all()}
+
+        fm_rows = await db.execute(
+            select(Message.transcript_id, Message.content)
+            .where(
+                Message.transcript_id.in_(transcript_ids),
+                Message.speaker == "user",
+            )
+            .order_by(Message.transcript_id, Message.sequence)
+            .distinct(Message.transcript_id)
+        )
+        for tid, content in fm_rows.all():
+            if content:
+                first_user_msg[tid] = content
+
+    items: list[TranscriptSummary] = []
+    for transcript in transcripts:
         items.append(
             TranscriptSummary(
                 id=transcript.id,
-                title=transcript.title,
+                title=_derive_title(transcript, first_user_msg.get(transcript.id)),
                 status=transcript.status,
-                message_count=message_count,
+                message_count=msg_counts.get(transcript.id, 0),
+                metadata=transcript.metadata_,
                 created_at=transcript.created_at,
             )
         )

@@ -4,6 +4,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Projects } from "./pages/Projects";
 import { ProjectDetail } from "./pages/ProjectDetail";
 import { Tasks } from "./pages/Tasks";
+import { Artifacts } from "./pages/Artifacts";
 import { Transcripts } from "./pages/Transcripts";
 import { TranscriptDetail } from "./pages/TranscriptDetail";
 import { Search } from "./pages/Search";
@@ -18,6 +19,7 @@ function App() {
         <Route path="/projects" element={<Projects />} />
         <Route path="/projects/:id" element={<ProjectDetail />} />
         <Route path="/tasks" element={<Tasks />} />
+        <Route path="/artifacts" element={<Artifacts />} />
         <Route path="/transcripts" element={<Transcripts />} />
         <Route path="/transcripts/:id" element={<TranscriptDetail />} />
         <Route path="/search" element={<Search />} />

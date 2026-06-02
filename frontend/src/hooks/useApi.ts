@@ -1,6 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { FilterParams, Stats, Transcript, TranscriptDetail, Project, Task, SearchResponse, SkillInfo, MiningResult } from "../api/types";
+import type {
+  FilterParams,
+  Stats,
+  Transcript,
+  TranscriptDetail,
+  Project,
+  Task,
+  Artifact,
+  SearchResponse,
+  SkillInfo,
+  MiningResult,
+} from "../api/types";
 
 const STALE_TIME = 30_000;
 
@@ -41,7 +52,10 @@ export function useProjects(params?: FilterParams) {
 }
 
 export function useProject(id: string) {
-  return useQuery<Project & { tasks?: Task[]; transcripts?: Transcript[] }, Error>({
+  return useQuery<
+    Project & { tasks?: Task[]; transcripts?: Transcript[] },
+    Error
+  >({
     queryKey: ["project", id],
     queryFn: () => api.getProject(id),
     enabled: !!id,
@@ -54,6 +68,14 @@ export function useTasks(params?: FilterParams) {
   return useQuery<{ items: Task[]; total: number }, Error>({
     queryKey: ["tasks", params],
     queryFn: () => api.listTasks(params),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useArtifacts(params?: FilterParams) {
+  return useQuery<{ items: Artifact[]; total: number }, Error>({
+    queryKey: ["artifacts", params],
+    queryFn: () => api.listArtifacts(params),
     staleTime: STALE_TIME,
   });
 }
@@ -71,7 +93,12 @@ export function useUpdateTaskStatus() {
 }
 
 // Search
-export function useSearch(query: string, type = "hybrid", filters?: Record<string, unknown>, enabled = false) {
+export function useSearch(
+  query: string,
+  type = "hybrid",
+  filters?: Record<string, unknown>,
+  enabled = false,
+) {
   return useQuery<SearchResponse, Error>({
     queryKey: ["search", query, type, filters],
     queryFn: () => api.search(query, type, filters),

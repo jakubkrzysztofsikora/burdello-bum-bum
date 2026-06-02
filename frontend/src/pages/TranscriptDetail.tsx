@@ -1,5 +1,11 @@
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, MessageSquare, Gem, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  ArrowLeft,
+  MessageSquare,
+  Gem,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { useState } from "react";
 import { format } from "date-fns";
 import { StatusBadge } from "../components/StatusBadge";
@@ -42,12 +48,14 @@ export function TranscriptDetail() {
         <ProviderIcon provider={transcript.provider} />
         <div className="flex-1 min-w-0">
           <h1 className="truncate text-xl font-bold">
-            {transcript.project_name || "Untitled Session"}
+            {transcript.title || transcript.project_name || "Untitled Session"}
           </h1>
           <div className="flex items-center gap-3 text-xs text-bb-muted">
             <span>{transcript.id}</span>
             <StatusBadge status={transcript.status} />
-            {transcript.model && <span className="font-mono">{transcript.model}</span>}
+            {transcript.model && (
+              <span className="font-mono">{transcript.model}</span>
+            )}
           </div>
         </div>
         {transcript.has_mining_results && (
@@ -61,7 +69,8 @@ export function TranscriptDetail() {
         <div className="lg:col-span-2 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-sm font-semibold">
-              <MessageSquare size={14} /> Messages ({transcript.messages?.length || 0})
+              <MessageSquare size={14} /> Messages (
+              {transcript.messages?.length || 0})
             </h2>
             {transcript.started_at && (
               <span className="text-xs text-bb-muted">
@@ -71,7 +80,7 @@ export function TranscriptDetail() {
           </div>
 
           <div className="space-y-2 max-h-[calc(100vh-240px)] overflow-auto pr-1">
-            {(!transcript.messages || transcript.messages.length === 0) ? (
+            {!transcript.messages || transcript.messages.length === 0 ? (
               <div className="rounded-lg border border-bb-border bg-bb-card p-6 text-center text-sm text-bb-muted">
                 No messages available
               </div>
@@ -83,8 +92,8 @@ export function TranscriptDetail() {
                     msg.role === "user"
                       ? "border-blue-500/20 bg-blue-500/5"
                       : msg.role === "assistant"
-                      ? "border-green-500/20 bg-green-500/5"
-                      : "border-bb-border bg-bb-card"
+                        ? "border-green-500/20 bg-green-500/5"
+                        : "border-bb-border bg-bb-card"
                   }`}
                 >
                   <div className="mb-1 flex items-center gap-2">
@@ -93,8 +102,8 @@ export function TranscriptDetail() {
                         msg.role === "user"
                           ? "text-blue-400"
                           : msg.role === "assistant"
-                          ? "text-green-400"
-                          : "text-bb-muted"
+                            ? "text-green-400"
+                            : "text-bb-muted"
                       }`}
                     >
                       {msg.role}
@@ -105,7 +114,9 @@ export function TranscriptDetail() {
                       </span>
                     )}
                   </div>
-                  <div className="whitespace-pre-wrap text-sm text-bb-text">{msg.content}</div>
+                  <div className="whitespace-pre-wrap text-sm text-bb-text">
+                    {msg.content}
+                  </div>
 
                   {msg.tool_calls && msg.tool_calls.length > 0 && (
                     <div className="mt-2 space-y-1">
@@ -113,13 +124,22 @@ export function TranscriptDetail() {
                         const globalIdx = idx * 100 + tidx;
                         const isExpanded = expandedTools.has(globalIdx);
                         return (
-                          <div key={tidx} className="rounded border border-bb-border bg-bb-dark">
+                          <div
+                            key={tidx}
+                            className="rounded border border-bb-border bg-bb-dark"
+                          >
                             <button
                               onClick={() => toggleTool(globalIdx)}
                               className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs"
                             >
-                              {isExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                              <span className="font-mono text-bb-accent">{tool.name}</span>
+                              {isExpanded ? (
+                                <ChevronDown size={10} />
+                              ) : (
+                                <ChevronRight size={10} />
+                              )}
+                              <span className="font-mono text-bb-accent">
+                                {tool.name}
+                              </span>
                               <span className="text-bb-muted">({tool.id})</span>
                             </button>
                             {isExpanded && (
@@ -129,7 +149,9 @@ export function TranscriptDetail() {
                                 </pre>
                                 {tool.result !== undefined && (
                                   <div className="mt-1 border-t border-bb-border pt-1">
-                                    <span className="text-xs text-bb-success">Result:</span>
+                                    <span className="text-xs text-bb-success">
+                                      Result:
+                                    </span>
                                     <pre className="overflow-auto text-xs text-bb-muted">
                                       {JSON.stringify(tool.result, null, 2)}
                                     </pre>
@@ -157,7 +179,9 @@ export function TranscriptDetail() {
               <div className="space-y-2">
                 {miningResults.map((mr) => (
                   <div key={mr.id} className="rounded bg-bb-dark p-2">
-                    <span className="text-xs font-medium text-bb-accent">{mr.result_type}</span>
+                    <span className="text-xs font-medium text-bb-accent">
+                      {mr.result_type}
+                    </span>
                     <pre className="mt-1 overflow-auto text-xs text-bb-muted">
                       {JSON.stringify(mr.content, null, 2)}
                     </pre>

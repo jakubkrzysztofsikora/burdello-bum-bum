@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -73,7 +73,33 @@ async def list_projects(
     base_query = base_query.offset(skip).limit(limit).order_by(Project.created_at.desc())
 
     result = await db.execute(base_query)
-    items = list(result.scalars().all())
+    projects = list(result.scalars().all())
+
+    # Aggregate task counts for the page's projects in one query.
+    counts: dict[Any, tuple[int, int]] = {}
+    project_ids = [p.id for p in projects]
+    if project_ids:
+        rows = await db.execute(
+            select(
+                Task.project_id,
+                func.count(Task.id),
+                func.coalesce(
+                    func.sum(case((Task.status == "done", 1), else_=0)), 0
+                ),
+            )
+            .where(Task.project_id.in_(project_ids))
+            .group_by(Task.project_id)
+        )
+        for pid, total_c, done_c in rows.all():
+            counts[pid] = (int(total_c), int(done_c))
+
+    items = []
+    for p in projects:
+        resp = ProjectResponse.model_validate(p)
+        tc, dc = counts.get(p.id, (0, 0))
+        resp.task_count = tc
+        resp.completed_task_count = dc
+        items.append(resp)
 
     page = skip // limit + 1 if limit > 0 else 1
     return {
