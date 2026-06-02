@@ -61,8 +61,8 @@ services:
     container_name: bb-redis
     command: >
       redis-server
-      --maxmemory 384mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory 1536mb
+      --maxmemory-policy noeviction
       --save ""
     ports:
       - "6379:6379"
@@ -76,7 +76,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          # Headroom above the 1536mb maxmemory; Redis is the Celery broker +
+          # result backend, so it must not evict (noeviction) under load.
+          memory: 2g
     networks:
       - bb-network
 

@@ -31,4 +31,7 @@ celery_app.conf.update(
     task_time_limit=3600,  # 1 hour max per task
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
+    # Don't let chain/task results linger in Redis for the 24h default — they
+    # accumulate and pressure the broker. 30 min is ample for the pipeline.
+    result_expires=1800,
 )
