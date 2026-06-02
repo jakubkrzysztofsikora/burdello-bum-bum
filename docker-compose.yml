@@ -151,7 +151,7 @@ services:
     command: >
       python -m celery -A backend.pipeline.celery_app worker
       --loglevel=info
-      --concurrency=2
+      --concurrency=4
       --max-tasks-per-child=100
       --max-memory-per-child=3000000
       -n worker@%h
@@ -191,7 +191,7 @@ services:
         limits:
           # Room for 2 worker children each holding the resident embedding
           # model (~1-2GB) plus transient encode/mining memory.
-          memory: 6g
+          memory: 10g
     # litellm is a Tailscale node (100.114.245.86 / litellm.tail5d39b4.ts.net).
     extra_hosts:
       - "litellm:100.114.245.86"
