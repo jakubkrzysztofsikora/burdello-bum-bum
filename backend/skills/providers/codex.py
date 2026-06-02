@@ -144,6 +144,15 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
             else:
                 rec_type = ""
 
+            # Codex wraps the real item under "payload":
+            #   {"type":"response_item","payload":{"type":"message","role":...,
+            #    "content":[...]}}
+            # Flatten it so role/content are reachable (rec_type already
+            # captured the line type above).
+            payload = record.get("payload")
+            if isinstance(payload, dict):
+                record = {**record, **payload}
+
             # Accumulate session metadata
             if rec_type == "session_meta":
                 session_metadata.update(record)
