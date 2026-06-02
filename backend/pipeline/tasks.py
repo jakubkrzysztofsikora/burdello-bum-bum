@@ -11,6 +11,7 @@ up to 3 times with exponential backoff.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -26,8 +27,30 @@ from backend.pipeline.embedding import EmbeddingEngine
 from backend.pipeline.normalization import TranscriptNormalizer
 from backend.pipeline.storage import PipelineStorage
 from backend.search.engine import HybridSearchEngine
+from backend.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
+
+# Built-in skills are discovered once per worker process and reused across
+# tasks (extract_task delegates JSONL/Markdown parsing to them).
+_skill_registry: SkillRegistry | None = None
+
+
+def _get_skill_registry() -> SkillRegistry:
+    """Return a process-wide, lazily-discovered skill registry."""
+    global _skill_registry
+    if _skill_registry is None:
+        registry = SkillRegistry()
+        registry.discover_builtin_skills()
+        _skill_registry = registry
+    return _skill_registry
+
+
+def _message_content_to_str(content: Any) -> str:
+    """Coerce a NormalizedMessage content (str/list/dict) into plain text."""
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, default=str, ensure_ascii=False)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
@@ -66,8 +89,9 @@ def process_source(self, source_path: str, provider_hint: str | None = None) -> 
 def extract_task(self, source_path: str, provider: str | None = None) -> dict[str, Any]:
     """Extract transcript data from a source file.
 
-    Currently uses a simple text-read strategy.  In production this
-    delegates to provider-specific skills.
+    Delegates to the best-matching provider skill (Claude Code, Codex, Kimi,
+    Vibe, Agy, Aider, …) to parse the file into structured messages. Falls
+    back to a raw text read when no skill matches or parsing yields nothing.
 
     Args:
         source_path: Path to the source file.
@@ -76,28 +100,69 @@ def extract_task(self, source_path: str, provider: str | None = None) -> dict[st
     Returns:
         Dict with ``source_path``, ``provider``, and ``extracted`` data.
     """
-    try:
-        with open(source_path, "r", encoding="utf-8", errors="replace") as fh:
-            raw_text = fh.read()
-    except Exception as exc:
-        logger.exception("extract_task: failed to read %s", source_path)
-        raise self.retry(exc=exc) from exc
+    path = Path(source_path)
 
     # Auto-detect provider from path if not given
     if not provider:
         provider = _detect_provider(source_path)
 
-    extracted = {
-        "source_type": provider,
-        "title": source_path.split("/")[-1] if "/" in source_path else source_path,
-        "raw_text": raw_text,
-        "language": "en",
-        "messages": [],
-        "metadata": {
-            "file_path": source_path,
-            "extraction_method": "text_read",
-        },
-    }
+    # Try provider-specific skill extraction first.
+    chosen = None
+    try:
+        transcripts = _get_skill_registry().extract(path)
+        chosen = next(
+            (t for t in transcripts if t.messages),
+            transcripts[0] if transcripts else None,
+        )
+    except Exception:
+        logger.exception("extract_task: skill extraction failed for %s", source_path)
+
+    if chosen is not None and chosen.messages:
+        messages = [
+            {
+                "speaker": m.speaker,
+                "content": _message_content_to_str(m.content),
+                "sequence": m.sequence,
+            }
+            for m in chosen.messages
+        ]
+        raw_text = chosen.raw_text or "\n".join(
+            f"{m['speaker'] or 'unknown'}: {m['content']}" for m in messages
+        )
+        extracted = {
+            "source_type": chosen.source_type or provider,
+            "title": chosen.title or path.name,
+            "raw_text": raw_text,
+            "language": chosen.language or "en",
+            "messages": messages,
+            "metadata": {
+                "file_path": source_path,
+                "extraction_method": "skill",
+                "skill": chosen.skill_name,
+                "session_id": chosen.session_id,
+                "project_name": chosen.project_name,
+            },
+        }
+    else:
+        # Fallback: raw text read (no matching skill or nothing parsed).
+        try:
+            with open(source_path, "r", encoding="utf-8", errors="replace") as fh:
+                raw_text = fh.read()
+        except Exception as exc:
+            logger.exception("extract_task: failed to read %s", source_path)
+            raise self.retry(exc=exc) from exc
+
+        extracted = {
+            "source_type": provider,
+            "title": path.name,
+            "raw_text": raw_text,
+            "language": "en",
+            "messages": [],
+            "metadata": {
+                "file_path": source_path,
+                "extraction_method": "text_read",
+            },
+        }
 
     return {
         "source_path": source_path,
@@ -186,6 +251,9 @@ def normalize_task(self, extraction_result: dict[str, Any]) -> dict[str, Any]:
 
             # Store transcript + messages
             transcript_id = await storage.store_transcript(source_id, normalized)
+
+            # Storage only flushes; commit so the rows survive the session.
+            await db.commit()
 
             return {
                 "transcript_id": str(transcript_id),
@@ -296,6 +364,9 @@ def embed_task(self, chunk_result: dict[str, Any]) -> dict[str, Any]:
 
             # Update transcript status
             await storage.update_transcript_status(transcript_id, "completed")
+
+            # Storage only flushes; commit so chunks + status survive.
+            await db.commit()
 
             return {
                 "transcript_id": transcript_id_str,
