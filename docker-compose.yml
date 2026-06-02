@@ -134,7 +134,7 @@ services:
     # litellm is a Tailscale node (100.114.245.86 / litellm.tail5d39b4.ts.net).
     # Map the bare hostname so LITELLM_URL=http://litellm resolves in-container.
     extra_hosts:
-      - "litellm:100.114.245.86"
+      - "litellm:100.116.31.6"
     networks:
       - bb-network
     restart: unless-stopped
@@ -194,7 +194,7 @@ services:
           memory: 4000m
     # litellm is a Tailscale node (100.114.245.86 / litellm.tail5d39b4.ts.net).
     extra_hosts:
-      - "litellm:100.114.245.86"
+      - "litellm:100.116.31.6"
     networks:
       - bb-network
     restart: unless-stopped
@@ -237,7 +237,7 @@ services:
         limits:
           memory: 1500m
     extra_hosts:
-      - "litellm:100.114.245.86"
+      - "litellm:100.116.31.6"
     networks:
       - bb-network
     restart: unless-stopped
