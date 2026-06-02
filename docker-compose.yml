@@ -1,0 +1,176 @@
+version: "3.8"
+
+services:
+  # ------------------------------------------------------------------
+  # PostgreSQL with pgvector extension
+  # ------------------------------------------------------------------
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: bb-postgres
+    environment:
+      POSTGRES_USER: bbuser
+      POSTGRES_PASSWORD: bbpass
+      POSTGRES_DB: burdello
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bbuser -d burdello"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - bb-network
+
+  # ------------------------------------------------------------------
+  # Qdrant vector store
+  # ------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: bb-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - bb-network
+
+  # ------------------------------------------------------------------
+  # Redis (cache + Celery broker)
+  # ------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: bb-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - bb-network
+
+  # ------------------------------------------------------------------
+  # Backend API server
+  # ------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: bb-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
+      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_COLLECTION: "burdello_chunks"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/1"
+      LITELLM_URL: "http://localhost:4000"
+      LITELLM_API_KEY: ""
+      BB_LOG_LEVEL: "INFO"
+      BB_EMBEDDING_MODEL: "nomic-embed-text-v2"
+      BB_CHUNK_SIZE: "512"
+      BB_CHUNK_OVERLAP: "50"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - bb-network
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # Celery worker
+  # ------------------------------------------------------------------
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: bb-celery-worker
+    command: >
+      celery -A backend.pipeline.celery_app worker
+      --loglevel=info
+      --concurrency=2
+      -n worker@%h
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
+      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_COLLECTION: "burdello_chunks"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/1"
+      LITELLM_URL: "http://localhost:4000"
+      LITELLM_API_KEY: ""
+      BB_LOG_LEVEL: "INFO"
+      BB_EMBEDDING_MODEL: "nomic-embed-text-v2"
+      BB_CHUNK_SIZE: "512"
+      BB_CHUNK_OVERLAP: "50"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - bb-network
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # Celery beat (periodic tasks scheduler)
+  # ------------------------------------------------------------------
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: bb-celery-beat
+    command: >
+      celery -A backend.pipeline.celery_app beat
+      --loglevel=info
+      --scheduler celery.beat.PersistentScheduler
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
+      CELERY_BROKER_URL: "redis://redis:6379/1"
+      BB_LOG_LEVEL: "INFO"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - bb-network
+    restart: unless-stopped
+
+# ------------------------------------------------------------------
+# Volumes
+# ------------------------------------------------------------------
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ------------------------------------------------------------------
+# Networks
+# ------------------------------------------------------------------
+networks:
+  bb-network:
+    driver: bridge
