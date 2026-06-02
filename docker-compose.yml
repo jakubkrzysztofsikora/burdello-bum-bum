@@ -212,8 +212,8 @@ services:
       python -m celery -A backend.pipeline.celery_app worker
       -Q mining
       --loglevel=info
-      --concurrency=6
-      --max-tasks-per-child=200
+      --concurrency=4
+      --max-tasks-per-child=100
       -n mining@%h
     volumes:
       - ./backend:/app/backend
