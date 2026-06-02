@@ -388,8 +388,14 @@ class MiningEngine:
             return parsed
 
         except json.JSONDecodeError as exc:
+            # The model returned unparseable content — retrying rarely helps,
+            # so treat as an empty (but successful) extraction.
             logger.error("_call_llm: JSON decode error: %s", exc)
             return {} if response_schema and response_schema.get("type") == "object" else []
         except Exception as exc:
-            logger.error("_call_llm: LLM call failed: %s", exc)
-            return {} if response_schema and response_schema.get("type") == "object" else []
+            # Connection / provider errors (e.g. LiteLLM unreachable) MUST
+            # propagate so the Celery task retries with backoff, instead of
+            # silently storing empty mining results and marking the transcript
+            # mined. Losing data on a transient outage is worse than retrying.
+            logger.error("_call_llm: LLM call failed (will retry): %s", exc)
+            raise
