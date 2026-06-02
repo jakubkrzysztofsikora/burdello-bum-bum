@@ -10,7 +10,7 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.models import (
@@ -284,6 +284,20 @@ class PipelineStorage:
             Counts of rows created, keyed by entity type.
         """
         counts = {"projects": 0, "tasks": 0, "artifacts": 0, "mining_results": 0}
+
+        # Idempotency: clear this transcript's prior mining output before
+        # re-inserting, so re-mining (e.g. after an LLM outage produced empty
+        # results) never duplicates tasks/artifacts/mining rows. Projects are
+        # shared across transcripts (deduped by name), so they are left intact.
+        await self.db.execute(
+            delete(Task).where(Task.source_transcript_id == transcript_id)
+        )
+        await self.db.execute(
+            delete(Artifact).where(Artifact.source_transcript_id == transcript_id)
+        )
+        await self.db.execute(
+            delete(MiningResult).where(MiningResult.transcript_id == transcript_id)
+        )
 
         # --- Projects (get-or-create by name) ---
         project_ids: dict[str, uuid.UUID] = {}
