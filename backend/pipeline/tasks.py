@@ -53,6 +53,31 @@ def _message_content_to_str(content: Any) -> str:
     return json.dumps(content, default=str, ensure_ascii=False)
 
 
+# The sentence-transformers model is expensive to load (~1GB resident). Cache
+# the chunker and embedder per worker process so the model loads once instead
+# of on every task — the dominant cost when ingesting at scale.
+_semantic_chunker: SemanticChunker | None = None
+_embedding_engine: EmbeddingEngine | None = None
+
+
+def _get_semantic_chunker() -> SemanticChunker:
+    """Return a process-wide, lazily-loaded semantic chunker."""
+    global _semantic_chunker
+    if _semantic_chunker is None:
+        _semantic_chunker = SemanticChunker(
+            max_chunk_size=get_settings().BB_CHUNK_SIZE,
+        )
+    return _semantic_chunker
+
+
+def _get_embedding_engine() -> EmbeddingEngine:
+    """Return a process-wide, lazily-loaded embedding engine."""
+    global _embedding_engine
+    if _embedding_engine is None:
+        _embedding_engine = EmbeddingEngine()
+    return _embedding_engine
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def process_source(self, source_path: str, provider_hint: str | None = None) -> dict[str, Any]:
     """Run the full processing pipeline on a single source file.
@@ -302,10 +327,8 @@ def chunk_task(self, normalize_result: dict[str, Any]) -> dict[str, Any]:
                     "reason": "empty_transcript",
                 }
 
-            # Chunk
-            chunker = SemanticChunker(
-                max_chunk_size=settings.BB_CHUNK_SIZE,
-            )
+            # Chunk (model cached per process)
+            chunker = _get_semantic_chunker()
             chunks = chunker.create_chunks(
                 text,
                 metadata={"transcript_id": transcript_id_str},
@@ -355,8 +378,8 @@ def embed_task(self, chunk_result: dict[str, Any]) -> dict[str, Any]:
             )
             storage = PipelineStorage(db=db, search_engine=search_engine)
 
-            # Generate embeddings
-            engine = EmbeddingEngine()
+            # Generate embeddings (model cached per process)
+            engine = _get_embedding_engine()
             embedded_chunks = engine.embed_chunks(chunks)
 
             # Store in DB + Qdrant
