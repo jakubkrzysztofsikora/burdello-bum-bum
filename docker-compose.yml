@@ -205,10 +205,8 @@ services:
   # LLM calls concurrently, collapsing the serial mining tail.
   # ------------------------------------------------------------------
   celery-mining:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
+    # Reuse the worker image (same code); mining loads no extra deps.
+    image: burdello-bum-bum-celery-worker:latest
     container_name: bb-celery-mining
     command: >
       python -m celery -A backend.pipeline.celery_app worker
