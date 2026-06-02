@@ -412,6 +412,67 @@ def embed_task(self, chunk_result: dict[str, Any]) -> dict[str, Any]:
         raise self.retry(exc=exc) from exc
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=15)
+def chunk_embed_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+    """Chunk AND embed a transcript in a single task.
+
+    Combining the two stages avoids the FIFO staging problem when many
+    transcripts are dispatched at once (the worker would otherwise run every
+    chunk before any embed). Each transcript is fully processed to
+    ``completed`` before the next, so progress is steady. Chains to mine_task.
+
+    Args:
+        payload: Dict with ``transcript_id``.
+
+    Returns:
+        Dict consumable by ``mine_task`` (``transcript_id``, ``status``).
+    """
+    import asyncio
+
+    transcript_id_str = payload.get("transcript_id")
+    if not transcript_id_str:
+        return {**payload, "status": "error", "reason": "no_transcript_id"}
+
+    transcript_id = uuid.UUID(transcript_id_str)
+
+    async def _run() -> dict[str, Any]:
+        async with AsyncSessionLocal() as db:
+            storage = PipelineStorage(db=db, search_engine=_get_search_engine())
+
+            text = await storage.get_transcript_text(transcript_id)
+            if not text:
+                return {
+                    "transcript_id": transcript_id_str,
+                    "status": "error",
+                    "reason": "empty_transcript",
+                }
+
+            chunks = _get_semantic_chunker().create_chunks(
+                text, metadata={"transcript_id": transcript_id_str}
+            )
+            if not chunks:
+                await storage.update_transcript_status(transcript_id, "completed")
+                await db.commit()
+                return {"transcript_id": transcript_id_str, "status": "no_chunks"}
+
+            embedded_chunks = _get_embedding_engine().embed_chunks(chunks)
+            chunk_ids = await storage.store_chunks(transcript_id, embedded_chunks)
+            await storage.update_transcript_status(transcript_id, "completed")
+            await db.commit()
+
+            return {
+                "transcript_id": transcript_id_str,
+                "embedded_count": len(chunk_ids),
+                "status": "embedded",
+            }
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.exception("chunk_embed_task: failed for %s", transcript_id_str)
+        raise self.retry(exc=exc) from exc
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def mine_task(self, embed_result: dict[str, Any]) -> dict[str, Any]:
     """Run LLM data mining on a transcript.
