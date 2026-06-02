@@ -140,6 +140,14 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
         for record in self.read_jsonl_lines(path):
             result.raw_lines += 1
 
+            # Claude Code wraps the real message under a "message" key:
+            #   {"type":"user","message":{"role":...,"content":...}}
+            # Flatten it so role/content are reachable by the helpers below
+            # (message fields win; top-level type/timestamp/uuid are kept).
+            inner = record.get("message")
+            if isinstance(inner, dict):
+                record = {**record, **inner}
+
             msg_type = record.get("type", "message")
             if msg_type not in _CLAUDE_MESSAGE_TYPES:
                 msg_type = "message"
