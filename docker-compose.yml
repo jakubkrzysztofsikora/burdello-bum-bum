@@ -98,6 +98,13 @@ services:
     # (the image's editable install resolves backend.* from /app/backend).
     volumes:
       - ./backend:/app/backend
+      # AI tool transcript dirs, mounted read-only under the container's
+      # $HOME (/home/bbuser) where the discovery globs look by default.
+      - ${HOME}/.claude:/home/bbuser/.claude:ro
+      - ${HOME}/.codex:/home/bbuser/.codex:ro
+      - ${HOME}/.kimi:/home/bbuser/.kimi:ro
+      - ${HOME}/.vibe:/home/bbuser/.vibe:ro
+      - ${HOME}/.gemini:/home/bbuser/.gemini:ro
     environment:
       DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
       QDRANT_URL: "http://qdrant:6333"
@@ -147,6 +154,12 @@ services:
       -n worker@%h
     volumes:
       - ./backend:/app/backend
+      # Same transcript mounts as the API: the worker runs the pipeline.
+      - ${HOME}/.claude:/home/bbuser/.claude:ro
+      - ${HOME}/.codex:/home/bbuser/.codex:ro
+      - ${HOME}/.kimi:/home/bbuser/.kimi:ro
+      - ${HOME}/.vibe:/home/bbuser/.vibe:ro
+      - ${HOME}/.gemini:/home/bbuser/.gemini:ro
     # The image HEALTHCHECK curls :8000 (the API); a worker doesn't serve it.
     healthcheck:
       disable: true
@@ -213,6 +226,34 @@ services:
       - bb-network
     restart: unless-stopped
 
+  # ------------------------------------------------------------------
+  # Frontend (React SPA — Vite dev server with live reload)
+  # ------------------------------------------------------------------
+  frontend:
+    image: node:20-alpine
+    container_name: bb-frontend
+    working_dir: /app
+    # Install deps into the named volume on first run, then serve with HMR.
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3000"
+    environment:
+      # Vite proxies /api to the backend service over the compose network.
+      VITE_API_PROXY: "http://backend:8000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      # Container-built node_modules (linux) shadow any host (darwin) ones.
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks:
+      - bb-network
+    restart: unless-stopped
+
 # ------------------------------------------------------------------
 # Volumes
 # ------------------------------------------------------------------
@@ -222,6 +263,8 @@ volumes:
   qdrant_data:
     driver: local
   redis_data:
+    driver: local
+  frontend_node_modules:
     driver: local
 
 # ------------------------------------------------------------------

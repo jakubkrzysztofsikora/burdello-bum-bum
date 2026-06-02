@@ -26,44 +26,37 @@ _ingest_status: dict[str, Any] = {}
 
 
 @router.post("/")
-async def trigger_ingest(
-    background_tasks: BackgroundTasks,
-    directories: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+async def trigger_ingest() -> dict[str, Any]:
     """Trigger source discovery and queue processing.
 
-    Discovers transcript files in the configured directories and
-    queues them for background processing.
-
-    Args:
-        background_tasks: FastAPI background tasks.
-        directories: Optional dict with a ``paths`` key listing
-            directories to scan. Defaults to current directory.
+    Discovers transcript files under the configured provider directories
+    (defaulting to the user's home directory) and dispatches each to the
+    Celery pipeline for background processing.
 
     Returns:
-        Dict with job ID and number of discovered sources.
+        Dict with job ID and number of discovered/queued sources.
     """
-    dir_list = directories.get("paths", ["."]) if directories else ["."]
-    discovery = SourceDiscovery(directories=dir_list)
-
-    sources = await discovery.discover()
+    discovery = SourceDiscovery()
+    sources = discovery.discover()
 
     job_id = f"ingest_{uuid.uuid4().hex[:8]}"
+    for source in sources:
+        process_source.delay(source["path"], source.get("provider"))
+
     _ingest_status[job_id] = {
         "status": "queued",
         "total": len(sources),
         "processed": 0,
         "failed": 0,
-        "sources": [s["file_path"] for s in sources],
+        "sources": [s["path"] for s in sources],
     }
 
-    logger.info("Ingest job %s: discovered %d sources", job_id, len(sources))
+    logger.info("Ingest job %s: queued %d sources", job_id, len(sources))
 
     return {
         "job_id": job_id,
         "discovered": len(sources),
-        "directories": dir_list,
-        "sources": sources,
+        "sources": [s["path"] for s in sources],
     }
 
 
