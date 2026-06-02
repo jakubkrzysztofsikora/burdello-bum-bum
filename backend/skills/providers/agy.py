@@ -89,40 +89,35 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
 
         if not path.exists():
             result = ExtractedTranscript(
-                source_path=path,
-                skill_name=self.metadata().name,
-                messages=[],
+                source_type="agy",
+                skill_name="agy",
             )
             result.errors.append(f"Path not found: {path}")
             yield result
             return
 
         if path.is_dir():
-            # Process all conversation directories
             found_any = False
             for subdir in sorted(d for d in path.iterdir() if d.is_dir()):
                 found_any = True
                 yield from self._process_conversation_dir(subdir)
-            # Also try JSONL files directly in the root
             for jsonl_file in sorted(path.glob("*.jsonl")):
                 found_any = True
                 yield from self._process_jsonl_file(jsonl_file)
-            # And markdown files
             for md_file in sorted(path.glob("*.md")):
                 found_any = True
                 yield from self._process_markdown_file(md_file)
 
             if not found_any:
                 result = ExtractedTranscript(
+                    source_type="agy",
+                    skill_name="agy",
                     source_path=path,
-                    skill_name=self.metadata().name,
-                    messages=[],
                 )
                 result.warnings.append(f"No conversation files found in: {path}")
                 yield result
             return
 
-        # Single file
         if path.suffix == ".jsonl":
             yield from self._process_jsonl_file(path)
         elif path.suffix == ".md":
@@ -131,9 +126,9 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
             yield from self._process_json_file(path)
         else:
             result = ExtractedTranscript(
+                source_type="agy",
+                skill_name="agy",
                 source_path=path,
-                skill_name=self.metadata().name,
-                messages=[],
             )
             result.warnings.append(f"Unsupported file type: {path.suffix}")
             yield result
@@ -173,21 +168,18 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
 
     def _process_conversation_dir(self, dir_path: Path) -> Iterator[ExtractedTranscript]:
         """Process a single conversation sub-directory."""
-        # Prefer JSONL files
         jsonl_files = sorted(dir_path.glob("*.jsonl"))
         if jsonl_files:
             for jsonl_file in jsonl_files:
                 yield from self._process_jsonl_file(jsonl_file)
             return
 
-        # Fall back to Markdown
         md_files = sorted(dir_path.glob("*.md"))
         if md_files:
             for md_file in md_files:
                 yield from self._process_markdown_file(md_file)
             return
 
-        # Try JSON
         json_files = sorted(dir_path.glob("*.json"))
         for json_file in json_files:
             yield from self._process_json_file(json_file)
@@ -195,18 +187,19 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
     def _process_jsonl_file(self, path: Path) -> Iterator[ExtractedTranscript]:
         """Process a single JSONL file."""
         result = ExtractedTranscript(
+            source_type="agy",
             source_path=path,
-            skill_name=self.metadata().name,
-            messages=[],
+            skill_name="agy",
             project_name=detect_project_name_from_path(path),
         )
 
         current_model: str | None = None
+        message_index = 0
 
         for record in self.read_jsonl_lines(path):
             result.raw_lines += 1
 
-            role = self._extract_role(record)
+            speaker = self._extract_speaker(record)
             content = self._extract_content(record)
             timestamp = self._extract_timestamp(record)
             model = record.get("model") or record.get("model_name")
@@ -225,8 +218,9 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
 
             result.messages.append(
                 NormalizedMessage(
-                    role=role,
+                    speaker=speaker,
                     content=content,
+                    sequence=message_index,
                     timestamp=timestamp,
                     message_type=msg_type,
                     model=current_model,
@@ -237,20 +231,22 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
                 ),
             )
             result.parsed_lines += 1
+            message_index += 1
 
         result.model = current_model
         if result.messages:
-            result.started_at = result.messages[0].timestamp
-            result.ended_at = result.messages[-1].timestamp
+            result.started_at = str(result.messages[0].timestamp) if result.messages[0].timestamp else None
+            result.ended_at = str(result.messages[-1].timestamp) if result.messages[-1].timestamp else None
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
     def _process_markdown_file(self, path: Path) -> Iterator[ExtractedTranscript]:
         """Process a single Markdown file."""
         result = ExtractedTranscript(
+            source_type="agy",
             source_path=path,
-            skill_name=self.metadata().name,
-            messages=[],
+            skill_name="agy",
             project_name=detect_project_name_from_path(path),
         )
 
@@ -262,22 +258,23 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
             return
 
         messages = self.parse_markdown_conversation(text, source_path=path)
+        for idx, m in enumerate(messages):
+            m.sequence = idx
         result.messages.extend(messages)
         result.raw_lines = len(text.splitlines())
         result.parsed_lines = len(messages)
 
         if result.messages:
-            result.started_at = result.messages[0].timestamp
-            result.ended_at = result.messages[-1].timestamp
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
     def _process_json_file(self, path: Path) -> Iterator[ExtractedTranscript]:
         """Process a single JSON file (array of messages or object with messages)."""
         result = ExtractedTranscript(
+            source_type="agy",
             source_path=path,
-            skill_name=self.metadata().name,
-            messages=[],
+            skill_name="agy",
             project_name=detect_project_name_from_path(path),
         )
 
@@ -305,13 +302,13 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
 
         current_model = data.get("model") if isinstance(data, dict) else None
 
-        for msg in messages:
+        for idx, msg in enumerate(messages):
             result.raw_lines += 1
             if not isinstance(msg, dict):
                 result.warnings.append(f"Skipping non-dict message: {type(msg).__name__}")
                 continue
 
-            role = self._extract_role(msg)
+            speaker = self._extract_speaker(msg)
             content = self._extract_content(msg)
             timestamp = self._extract_timestamp(msg)
             model = msg.get("model") or msg.get("model_name")
@@ -321,8 +318,9 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
             if content is not None:
                 result.messages.append(
                     NormalizedMessage(
-                        role=role,
+                        speaker=speaker,
                         content=content,
+                        sequence=idx,
                         timestamp=timestamp,
                         model=current_model,
                     ),
@@ -335,8 +333,7 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
 
         result.model = current_model
         if result.messages:
-            result.started_at = result.messages[0].timestamp
-            result.ended_at = result.messages[-1].timestamp
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
@@ -344,8 +341,8 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _extract_role(self, record: dict[str, Any]) -> str:
-        """Map the role field to a normalised role slug."""
+    def _extract_speaker(self, record: dict[str, Any]) -> str:
+        """Map the role field to a normalised speaker slug."""
         raw_role = record.get("role", "")
         if isinstance(raw_role, str):
             role_lower = raw_role.lower()
@@ -357,7 +354,6 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
                 return "system"
             if role_lower == "tool":
                 return "tool"
-        # Infer from sender/author
         sender = record.get("sender") or record.get("author")
         if isinstance(sender, str):
             sender_lower = sender.lower()
@@ -444,3 +440,17 @@ class AgySkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
             return str(content)
 
         return None
+
+    @staticmethod
+    def _concatenate_raw_text(messages: list[NormalizedMessage]) -> str:
+        """Join all message contents into a single raw text string."""
+        parts: list[str] = []
+        for m in messages:
+            if isinstance(m.content, str):
+                parts.append(f"{m.speaker or 'unknown'}: {m.content}")
+            elif isinstance(m.content, list):
+                text_parts = [b.text for b in m.content if hasattr(b, "text")]
+                parts.append(f"{m.speaker or 'unknown'}: {' '.join(text_parts)}")
+            else:
+                parts.append(f"{m.speaker or 'unknown'}: {str(m.content)}")
+        return "\n\n".join(parts)

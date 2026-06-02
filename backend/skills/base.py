@@ -1,255 +1,278 @@
-"""Base dataclasses and abstract class for skill-extracted transcript data.
+"""Abstract base classes and data models for the transcript skill system.
 
-Provides ``ContentBlock``, ``SkillMetadata``, ``NormalizedMessage``,
-``ExtractedTranscript``, and ``TranscriptSkill`` — the standard
-interchange format between provider-specific extraction skills and
-the normalisation pipeline.
+Defines the core abstractions that every transcript extraction skill must
+implement, along with the rich data-transfer objects used to represent
+parsed conversation transcripts in a normalised, provider-agnostic form.
 """
 
 from __future__ import annotations
 
-import uuid
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
-
-
-# ---------------------------------------------------------------------------
-# ContentBlock
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ContentBlock:
-    """A structured content block within a message (text, image, tool-use, etc.).
-
-    Attributes:
-        type: The block type — ``text``, ``tool_use``, ``tool_result``,
-            ``image``, ``thinking``, etc.
-        text: Plain-text content (primary for ``text`` and ``thinking``).
-        source: For ``image`` blocks — a dict with ``type`` and ``media_type``.
-        tool_use_id: For ``tool_result`` blocks — references the matching
-            ``tool_use`` block.
-        name: For ``tool_use`` blocks — the tool name.
-        input: For ``tool_use`` blocks — the tool arguments.
-        output: For ``tool_result`` blocks — the tool output.
-        error: For ``tool_result`` blocks — error message if the tool failed.
-        metadata: Additional provider-specific fields.
-    """
-
-    type: str = "text"
-    text: str | None = None
-    source: dict[str, Any] | None = None
-    tool_use_id: str | None = None
-    name: str | None = None
-    input: dict[str, Any] | None = None
-    output: str | None = None
-    error: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-
+from typing import Any, Iterator, Optional
 
 # ---------------------------------------------------------------------------
-# SkillMetadata
+# Module-level logger
+# ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Skill metadata
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class SkillMetadata:
-    """Metadata describing a transcript extraction skill.
+    """Human- and machine-readable metadata describing a single skill.
 
     Attributes:
-        name: Machine-readable skill name (e.g. ``claude_code``).
-        version: Semantic version string.
-        display_name: Human-readable name.
-        description: Short description of what the skill does.
-        supported_formats: List of file extensions this skill handles.
-        priority: Lower numbers = higher priority (0 is highest).
-        enabled: Whether the skill is active.
-        author: Author or team name.
-        url: Optional URL to documentation.
+        name: Machine-friendly identifier (snake_case).
+        version: Semantic version string, e.g. ``"1.0.0"``.
+        display_name: Human-friendly title shown in UI listings.
+        description: One or two sentences explaining what the skill does.
+        supported_formats: File extensions this skill can consume, e.g.
+            ``[".jsonl", ".json"]``.
+        priority: Conflict-resolution priority. **Lower** values win when two
+            skills return the same ``can_handle`` score.  Default ``100``.
+        enabled: Whether the skill is active and available for discovery.
+        author: Name or handle of the skill author.
+        url: Link to documentation or source code.
     """
 
     name: str
-    version: str = "1.0.0"
-    display_name: str = ""
-    description: str = ""
-    supported_formats: list[str] = field(default_factory=list)
-    priority: int = 100
+    version: str
+    display_name: str
+    description: str
+    supported_formats: list[str]
+    priority: int = 100  # Lower = higher priority for conflict resolution
     enabled: bool = True
     author: str = ""
     url: str = ""
 
-    def __post_init__(self) -> None:
-        """Set display_name from name if not provided."""
-        if not self.display_name:
-            self.display_name = self.name.replace("_", " ").title()
-
 
 # ---------------------------------------------------------------------------
-# NormalizedMessage
+# Normalised content model
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class NormalizedMessage:
-    """A single message / utterance extracted from a transcript source.
+class ContentBlock:
+    """A typed content block inside a :class:`NormalizedMessage`.
+
+    Represents rich content such as code snippets, tool calls, tool
+    results, or inline images that a provider may embed in a message.
 
     Attributes:
-        role: The speaker role — ``user``, ``assistant``, ``system``, ``tool``.
-        content: The text content of the message. May be a plain string or
-            a list of ``ContentBlock`` objects.
-        timestamp: Optional wall-clock timestamp (ISO-8601 string).
-        model: The AI model name that produced this message, if applicable.
-        metadata: Extra provider-specific fields.
-        sequence: Zero-based order index within the transcript.
+        type: Block category — ``"text"``, ``"code"``, ``"tool_use"``,
+            ``"tool_result"``, or ``"image"``.
+        text: The primary textual payload.
+        language: Programming language for ``type="code"`` blocks.
+        tool_name: Function name for ``type="tool_use"`` blocks.
+        tool_input: Arguments dict for ``type="tool_use"`` blocks.
+        tool_use_id: Correlation ID linking a tool call to its result.
+        tool_result: Serialized result string for ``type="tool_result"``.
+        mime_type: MIME type for binary/image content.
     """
 
-    role: str | None = None
-    content: str | list[ContentBlock] = ""
-    timestamp: str | None = None
-    model: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    type: str  # text, code, tool_use, tool_result, image
+    text: str = ""
+    language: Optional[str] = None
+    tool_name: Optional[str] = None
+    tool_input: Optional[dict] = None
+    tool_use_id: Optional[str] = None
+    tool_result: Optional[str] = None
+    mime_type: Optional[str] = None
+
+
+@dataclass
+class NormalizedMessage:
+    """A single message within a conversation, in a provider-agnostic form.
+
+    This dataclass is **backward-compatible** with the pipeline normaliser
+    which expects ``speaker`` (not ``role``) and ``sequence`` fields.
+    The ``role`` alias property maps to ``speaker`` for newer code.
+
+    Attributes:
+        speaker: Who produced the message — ``"user"``, ``"assistant"``,
+            ``"system"``, or ``"tool"``.  Maps to the ``speaker`` column in
+            the DB.
+        content: Raw string or a list of :class:`ContentBlock` objects when
+            the provider delivers rich / structured content.
+        sequence: Zero-based order of this message within the transcript.
+        timestamp: A :class:`~datetime.datetime` or ISO-8601 string if
+            available.  The normaliser calls ``.timestamp()`` on it when it
+            is a ``datetime``.
+        message_type: Semantic category — ``"message"``, ``"tool_use"``,
+            ``"tool_result"``, ``"thinking"``, ``"summary"``.
+        model: Model name or identifier (e.g. ``"claude-sonnet-4-20250514"``).
+        metadata: Provider-specific key-value store.
+    """
+
+    speaker: Optional[str] = None
+    content: str | list[Any] | dict[str, Any] = ""
     sequence: int = 0
+    timestamp: datetime | str | None = None
+    message_type: str = "message"
+    model: Optional[str] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    # Legacy alias for compatibility
     @property
-    def speaker(self) -> str | None:
-        """Return the role as speaker (legacy alias)."""
-        return self.role
+    def role(self) -> str:
+        """Alias for ``speaker`` (returns ``"unknown"`` when *speaker* is ``None``)."""
+        return self.speaker or "unknown"
 
-    @speaker.setter
-    def speaker(self, value: str | None) -> None:
-        """Set the role via speaker (legacy alias)."""
-        self.role = value
+    @role.setter
+    def role(self, value: str) -> None:
+        """Set ``speaker`` via the ``role`` alias."""
+        self.speaker = value
 
 
 # ---------------------------------------------------------------------------
-# ExtractedTranscript
+# Extraction result
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class ExtractedTranscript:
-    """The result of extracting a transcript from a provider-specific source.
+    """The artifact produced by a skill after parsing a source file.
+
+    This dataclass is **backward-compatible** with the pipeline normaliser
+    which expects ``source_type``, ``title``, ``raw_text``, ``language``,
+    ``messages``, and ``metadata`` fields.
 
     Attributes:
-        source_path: Path to the source file that was parsed.
-        skill_name: Name of the skill that performed extraction.
-        project_name: Inferred project name from directory structure.
-        messages: List of normalised messages in conversation order.
-        model: AI model identifier used in the session.
-        started_at: Session start timestamp (ISO-8601).
-        ended_at: Session end timestamp (ISO-8601).
-        raw_lines: Total lines read from the source.
-        parsed_lines: Number of lines successfully parsed into messages.
-        errors: Non-fatal errors encountered during extraction.
-        warnings: Warnings encountered during extraction.
-        metadata: Extra provider-specific metadata.
-        # Legacy fields for pipeline compatibility
-        source_type: str = "unknown"
-        title: str | None = None
-        raw_text: str = ""
-        language: str = "en"
+        source_type: Provider identifier (e.g. ``"claude_code"``).  Alias for
+            :attr:`skill_name` when not provided explicitly.
+        title: Human-readable transcript title.
+        raw_text: The full raw text of the transcript (concatenated messages).
+        language: ISO-639-1 language code.
+        messages: Ordered list of normalised conversation messages.
+        metadata: Arbitrary additional data from the provider format.
+        source_path: Absolute path to the file that was parsed.
+        skill_name: Identifier of the skill that produced this result.
+        session_id: Optional session identifier extracted from the file.
+        project_name: Optional project name inferred from path or metadata.
+        model: AI model identifier if known.
+        started_at: ISO-8601 timestamp for session start.
+        ended_at: ISO-8601 timestamp for session end.
+        warnings: Non-fatal issues encountered during parsing.
+        errors: Fatal errors that prevented full extraction.
+        raw_lines: Total lines / records read from source.
+        parsed_lines: Lines / records successfully converted to messages.
     """
 
-    # Primary fields (used by the existing skill system)
-    source_path: Path | None = None
-    skill_name: str = ""
-    project_name: str | None = None
+    source_type: str = ""
+    title: Optional[str] = None
+    raw_text: Optional[str] = None
+    language: Optional[str] = None
     messages: list[NormalizedMessage] = field(default_factory=list)
-    model: str | None = None
-    started_at: str | None = None
-    ended_at: str | None = None
-    raw_lines: int = 0
-    parsed_lines: int = 0
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    # Legacy fields for pipeline compatibility
-    source_type: str = "unknown"
-    title: str | None = None
-    raw_text: str = ""
-    language: str = "en"
+    # New extended fields
+    source_path: Optional[Path] = None
+    skill_name: str = ""
+    session_id: Optional[str] = None
+    project_name: Optional[str] = None
+    model: Optional[str] = None
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    raw_lines: int = 0
+    parsed_lines: int = 0
+
+    def __post_init__(self) -> None:
+        """Ensure backward-compatibility aliases are populated."""
+        if not self.source_type and self.skill_name:
+            self.source_type = self.skill_name
+        if not self.skill_name and self.source_type:
+            self.skill_name = self.source_type
+
+    @property
+    def success(self) -> bool:
+        """Return ``True`` if at least one message was extracted."""
+        return len(self.messages) > 0
+
+    @property
+    def message_count(self) -> int:
+        """Return the number of extracted messages."""
+        return len(self.messages)
 
 
 # ---------------------------------------------------------------------------
-# TranscriptSkill (abstract base)
+# Abstract base class for skills
 # ---------------------------------------------------------------------------
 
 
 class TranscriptSkill(ABC):
-    """Abstract base class for transcript extraction skills.
+    """Abstract base class for all transcript extraction skills.
 
-    Concrete subclasses must implement:
+    Each concrete skill implements four class-level hooks:
 
-    * :meth:`metadata` — classmethod returning ``SkillMetadata``.
-    * :meth:`can_handle` — classmethod scoring how well this skill
-      can parse a given file path.
-    * :meth:`extract_transcripts` — instance method yielding
-      ``ExtractedTranscript`` objects.
+    1. :meth:`metadata` — returns :class:`SkillMetadata`.
+    2. :meth:`can_handle` — returns a confidence score (``0.0`` to ``1.0``)
+       indicating how strongly this skill believes it can parse *path*.
+    3. :meth:`extract_transcripts` — lazily yields
+       :class:`ExtractedTranscript` objects.
+    4. :meth:`validate_source` — pre-flight check returning a list of
+       human-readable issues (empty list == valid).
+
+    **IMPORTANT**: ``metadata`` is a ``@classmethod`` (NOT a
+    ``@classmethod @property`` combo).  Python 3.12+ removed the
+    classmethod+property descriptor stack, so callers must use
+    ``cls.metadata()`` (with parentheses).
     """
 
     @classmethod
     @abstractmethod
     def metadata(cls) -> SkillMetadata:
-        """Return metadata describing this skill.
-
-        Returns:
-            A ``SkillMetadata`` instance with name, version, formats, etc.
-        """
+        """Return the static metadata descriptor for this skill."""
+        ...
 
     @classmethod
     @abstractmethod
     def can_handle(cls, path: Path) -> float:
-        """Score how well this skill can parse *path*.
+        """Return a confidence score in ``[0.0, 1.0]``.
 
-        Args:
-            path: File system path to evaluate.
+        Scoring convention:
 
-        Returns:
-            A confidence score in the range ``[0.0, 1.0]`` where ``1.0``
-            means "definitely can handle this file" and ``0.0`` means
-            "cannot handle this file at all".
+        * ``1.0`` — exact match (the path follows the provider's canonical
+          directory or naming convention).
+        * ``0.5`` — partial / filename match.
+        * ``0.3`` — related directory (same parent tool, different sub-dir).
+        * ``0.1`` — generic format match (e.g. any ``.jsonl`` file).
+        * ``0.0`` — no match at all.
         """
+        ...
 
     @abstractmethod
     def extract_transcripts(
         self,
         path: Path,
-        **options: object,
+        **options: Any,
     ) -> Iterator[ExtractedTranscript]:
-        """Extract transcripts from the given file path.
+        """Extract one or more transcripts from *path*.
 
         Args:
-            path: File system path to parse.
-            **options: Extra extraction options (e.g. encoding, chunk size).
+            path: File system location to parse.
+            **options: Provider-specific knobs (e.g. encoding, date filter).
 
         Yields:
-            ``ExtractedTranscript`` objects containing the parsed messages.
+            :class:`ExtractedTranscript` instances (one per conversation
+            session found in the source).
         """
+        ...
 
+    @abstractmethod
     def validate_source(self, path: Path) -> list[str]:
-        """Return a list of issues with the source file.
-
-        Default implementation just checks the file exists and is readable.
-
-        Args:
-            path: File system path to validate.
+        """Validate that *path* looks parseable **before** extraction.
 
         Returns:
-            List of issue descriptions (empty if no issues).
+            A list of human-readable issue descriptions.  An empty list
+            means the source appears valid.
         """
-        issues: list[str] = []
-        resolved = path.resolve()
-
-        if not resolved.exists():
-            issues.append(f"Path does not exist: {resolved}")
-        elif not resolved.is_file():
-            issues.append(f"Path is not a file: {resolved}")
-        elif resolved.stat().st_size == 0:
-            issues.append("File is empty")
-
-        return issues
+        ...

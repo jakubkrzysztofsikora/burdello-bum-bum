@@ -116,9 +116,9 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
         """Yield a single :class:`ExtractedTranscript` from a Claude Code JSONL file."""
         path = path.resolve()
         result = ExtractedTranscript(
+            source_type="claude_code",
             source_path=path,
-            skill_name=self.metadata().name,
-            messages=[],
+            skill_name="claude_code",
             project_name=detect_project_name_from_path(path),
         )
 
@@ -135,6 +135,7 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
 
         current_model: str | None = None
         current_session: str | None = None
+        message_index = 0
 
         for record in self.read_jsonl_lines(path):
             result.raw_lines += 1
@@ -143,7 +144,7 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
             if msg_type not in _CLAUDE_MESSAGE_TYPES:
                 msg_type = "message"
 
-            role = self._extract_role(record)
+            speaker = self._extract_speaker(record)
             timestamp = self._extract_timestamp(record)
             model = record.get("model") or record.get("model_name")
             session_id = record.get("session_id")
@@ -161,8 +162,9 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
                 continue
 
             norm_msg = NormalizedMessage(
-                role=role,
+                speaker=speaker,
                 content=content,
+                sequence=message_index,
                 timestamp=timestamp,
                 message_type=msg_type,
                 model=current_model,
@@ -173,12 +175,14 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
             )
             result.messages.append(norm_msg)
             result.parsed_lines += 1
+            message_index += 1
 
         result.model = current_model
         result.session_id = current_session
         if result.messages:
-            result.started_at = result.messages[0].timestamp
-            result.ended_at = result.messages[-1].timestamp
+            result.started_at = str(result.messages[0].timestamp) if result.messages[0].timestamp else None
+            result.ended_at = str(result.messages[-1].timestamp) if result.messages[-1].timestamp else None
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
@@ -235,12 +239,11 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _extract_role(self, record: dict[str, Any]) -> str:
-        """Map the Claude ``role`` field to a normalised role slug."""
+    def _extract_speaker(self, record: dict[str, Any]) -> str:
+        """Map the Claude ``role`` field to a normalised speaker slug."""
         raw_role = record.get("role", "")
         if isinstance(raw_role, str):
             return _CLAUDE_ROLE_MAP.get(raw_role.lower(), "assistant")
-        # Default to assistant when role is missing or malformed
         return "assistant"
 
     def _extract_timestamp(self, record: dict[str, Any]) -> str | None:
@@ -291,7 +294,6 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
                     result_text = __import__("json").dumps(content)
             elif content is not None:
                 result_text = str(content)
-            # Also check dedicated result field
             if not result_text:
                 result_text = record.get("result", "") or record.get("output", "")
             return [
@@ -366,3 +368,17 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
             return record.get("thinking", "") or record.get("summary", "") or ""
 
         return None
+
+    @staticmethod
+    def _concatenate_raw_text(messages: list[NormalizedMessage]) -> str:
+        """Join all message contents into a single raw text string."""
+        parts: list[str] = []
+        for m in messages:
+            if isinstance(m.content, str):
+                parts.append(f"{m.speaker or 'unknown'}: {m.content}")
+            elif isinstance(m.content, list):
+                text_parts = [b.text for b in m.content if hasattr(b, "text")]
+                parts.append(f"{m.speaker or 'unknown'}: {' '.join(text_parts)}")
+            else:
+                parts.append(f"{m.speaker or 'unknown'}: {str(m.content)}")
+        return "\n\n".join(parts)

@@ -350,7 +350,7 @@ class MarkdownSkillMixin(ABC):
                 if content:
                     messages.append(
                         NormalizedMessage(
-                            role=current_role,
+                            speaker=current_role,
                             content=content,
                             metadata={"source": str(source_path)} if source_path else {},
                         ),

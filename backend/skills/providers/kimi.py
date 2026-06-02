@@ -119,9 +119,9 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
         """Yield :class:`ExtractedTranscript` from a Kimi ``wire.jsonl`` file."""
         path = path.resolve()
         result = ExtractedTranscript(
+            source_type="kimi",
             source_path=path,
-            skill_name=self.metadata().name,
-            messages=[],
+            skill_name="kimi",
             project_name=detect_project_name_from_path(path),
         )
 
@@ -131,7 +131,6 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
             return
 
         if path.is_dir():
-            # Look for wire.jsonl inside session dirs
             for wire_file in sorted(path.rglob("wire.jsonl")):
                 yield from self.extract_transcripts(wire_file, **options)
             return
@@ -139,13 +138,14 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
         current_model: str | None = None
         buffer_text_parts: list[str] = []
         buffer_think_parts: list[str] = []
-        current_role: str = "assistant"
+        current_speaker: str = "assistant"
         current_timestamp: str | None = None
         current_metadata: dict[str, Any] = {}
+        message_index = 0
 
         def _flush_buffered() -> None:
             """Flush accumulated text/think parts as a single message."""
-            nonlocal buffer_text_parts, buffer_think_parts
+            nonlocal buffer_text_parts, buffer_think_parts, message_index
             texts = []
             if buffer_text_parts:
                 texts.append("".join(buffer_text_parts))
@@ -155,14 +155,16 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
                 content = "\n".join(texts)
                 result.messages.append(
                     NormalizedMessage(
-                        role=current_role,
+                        speaker=current_speaker,
                         content=content,
+                        sequence=message_index,
                         timestamp=current_timestamp,
                         model=current_model,
                         metadata=dict(current_metadata),
                     ),
                 )
                 result.parsed_lines += 1
+                message_index += 1
             buffer_text_parts = []
             buffer_think_parts = []
 
@@ -174,12 +176,10 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
             if timestamp:
                 current_timestamp = timestamp
 
-            # Update model if present
             model = record.get("model") or record.get("model_name")
             if model:
                 current_model = model
 
-            # Handle different event types
             if event_type in ("text_part",):
                 text = record.get("text", "") or record.get("content", "")
                 if isinstance(text, str):
@@ -192,11 +192,9 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
                     buffer_think_parts.append(text)
                 continue
 
-            # For non-buffered events, flush any pending text first
             _flush_buffered()
 
             if event_type == "status_update":
-                # Status updates don't produce messages but may carry metadata
                 status = record.get("status") or record.get("state", "")
                 if status and isinstance(status, str):
                     result.metadata["last_status"] = status
@@ -209,7 +207,7 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
                 tool_text = record.get("text", "")
                 result.messages.append(
                     NormalizedMessage(
-                        role="assistant",
+                        speaker="assistant",
                         content=[
                             ContentBlock(
                                 type="tool_use",
@@ -219,12 +217,14 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
                                 tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
                             ),
                         ],
+                        sequence=message_index,
                         timestamp=current_timestamp,
                         message_type="tool_use",
                         model=current_model,
                     ),
                 )
                 result.parsed_lines += 1
+                message_index += 1
                 continue
 
             if event_type in ("tool_result",):
@@ -234,7 +234,7 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
                     result_text = str(result_text)
                 result.messages.append(
                     NormalizedMessage(
-                        role="tool",
+                        speaker="tool",
                         content=[
                             ContentBlock(
                                 type="tool_result",
@@ -242,28 +242,32 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
                                 tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
                             ),
                         ],
+                        sequence=message_index,
                         timestamp=current_timestamp,
                         message_type="tool_result",
                         model=current_model,
                     ),
                 )
                 result.parsed_lines += 1
+                message_index += 1
                 continue
 
             if event_type in ("user_message", "message"):
-                role = self._extract_role(record)
+                speaker = self._extract_speaker(record)
                 content = self._extract_content(record)
                 if content is not None:
                     result.messages.append(
                         NormalizedMessage(
-                            role=role,
+                            speaker=speaker,
                             content=content,
+                            sequence=message_index,
                             timestamp=current_timestamp,
                             message_type="message",
                             model=current_model,
                         ),
                     )
                     result.parsed_lines += 1
+                    message_index += 1
                 continue
 
             if event_type in ("assistant_message",):
@@ -271,42 +275,45 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
                 if content is not None:
                     result.messages.append(
                         NormalizedMessage(
-                            role="assistant",
+                            speaker="assistant",
                             content=content,
+                            sequence=message_index,
                             timestamp=current_timestamp,
                             message_type="message",
                             model=current_model,
                         ),
                     )
                     result.parsed_lines += 1
+                    message_index += 1
                 continue
 
-            # Fallback: try to extract content from unknown event types
             content = self._extract_content(record)
             if content is not None:
-                role = self._extract_role(record)
+                speaker = self._extract_speaker(record)
                 result.messages.append(
                     NormalizedMessage(
-                        role=role,
+                        speaker=speaker,
                         content=content,
+                        sequence=message_index,
                         timestamp=current_timestamp,
                         model=current_model,
                         metadata={"event_type": event_type},
                     ),
                 )
                 result.parsed_lines += 1
+                message_index += 1
             else:
                 result.warnings.append(
                     f"Line {result.raw_lines}: unhandled event type '{event_type}'"
                 )
 
-        # Flush any remaining buffered text parts
         _flush_buffered()
 
         result.model = current_model
         if result.messages:
-            result.started_at = result.messages[0].timestamp
-            result.ended_at = result.messages[-1].timestamp
+            result.started_at = str(result.messages[0].timestamp) if result.messages[0].timestamp else None
+            result.ended_at = str(result.messages[-1].timestamp) if result.messages[-1].timestamp else None
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
@@ -370,14 +377,13 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
                 return val.lower().replace(" ", "_")
         return ""
 
-    def _extract_role(self, record: dict[str, Any]) -> str:
-        """Map the Kimi ``role`` field to a normalised role slug."""
+    def _extract_speaker(self, record: dict[str, Any]) -> str:
+        """Map the Kimi ``role`` field to a normalised speaker slug."""
         raw_role = record.get("role", "")
         if isinstance(raw_role, str):
             mapped = _KIMI_ROLE_MAP.get(raw_role.lower())
             if mapped:
                 return mapped
-        # Infer from event type
         event_type = self._extract_event_type(record)
         if event_type in ("user_message", "text_input"):
             return "user"
@@ -407,7 +413,6 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
         content = record.get("content")
         text = record.get("text")
 
-        # Prefer 'content', fall back to 'text'
         if content is None and text is not None:
             content = text
 
@@ -442,9 +447,7 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
                         result_text = item.get("content", "") or item.get("output", "")
                         if not isinstance(result_text, str):
                             result_text = str(result_text)
-                        blocks.append(
-                            ContentBlock(type="tool_result", text=result_text),
-                        )
+                        blocks.append(ContentBlock(type="tool_result", text=result_text))
                     else:
                         blocks.append(ContentBlock(type="text", text=item.get("text", "")))
                 elif isinstance(item, str):
@@ -457,9 +460,22 @@ class KimiSkill(TranscriptSkill, JSONLSkillMixin):
         if content is not None:
             return str(content)
 
-        # Fallback: try 'message' field
         message = record.get("message")
         if isinstance(message, str):
             return message
 
         return None
+
+    @staticmethod
+    def _concatenate_raw_text(messages: list[NormalizedMessage]) -> str:
+        """Join all message contents into a single raw text string."""
+        parts: list[str] = []
+        for m in messages:
+            if isinstance(m.content, str):
+                parts.append(f"{m.speaker or 'unknown'}: {m.content}")
+            elif isinstance(m.content, list):
+                text_parts = [b.text for b in m.content if hasattr(b, "text")]
+                parts.append(f"{m.speaker or 'unknown'}: {' '.join(text_parts)}")
+            else:
+                parts.append(f"{m.speaker or 'unknown'}: {str(m.content)}")
+        return "\n\n".join(parts)

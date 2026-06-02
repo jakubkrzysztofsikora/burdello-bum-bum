@@ -115,9 +115,9 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
         """Yield :class:`ExtractedTranscript` objects from a Codex JSONL file."""
         path = path.resolve()
         result = ExtractedTranscript(
+            source_type="codex",
             source_path=path,
-            skill_name=self.metadata().name,
-            messages=[],
+            skill_name="codex",
             project_name=detect_project_name_from_path(path),
         )
 
@@ -133,6 +133,7 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
 
         current_model: str | None = None
         session_metadata: dict[str, Any] = {}
+        message_index = 0
 
         for record in self.read_jsonl_lines(path):
             result.raw_lines += 1
@@ -152,8 +153,8 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
                     result.session_id = record.get("session_id") or record.get("id")
                 continue
 
-            # Extract role and content based on record type
-            role = self._extract_role(record, rec_type)
+            # Extract speaker and content based on record type
+            speaker = self._extract_speaker(record, rec_type)
             timestamp = self._extract_timestamp(record)
             content = self._extract_content(record, rec_type)
 
@@ -167,8 +168,9 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
             msg_type = self._classify_message_type(record, rec_type)
 
             norm_msg = NormalizedMessage(
-                role=role,
+                speaker=speaker,
                 content=content,
+                sequence=message_index,
                 timestamp=timestamp,
                 message_type=msg_type,
                 model=current_model,
@@ -179,12 +181,14 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
             )
             result.messages.append(norm_msg)
             result.parsed_lines += 1
+            message_index += 1
 
         result.model = current_model
         result.metadata = session_metadata
         if result.messages:
-            result.started_at = result.messages[0].timestamp
-            result.ended_at = result.messages[-1].timestamp
+            result.started_at = str(result.messages[0].timestamp) if result.messages[0].timestamp else None
+            result.ended_at = str(result.messages[-1].timestamp) if result.messages[-1].timestamp else None
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
@@ -239,16 +243,15 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _extract_role(self, record: dict[str, Any], rec_type: str) -> str:
-        """Determine the speaker role for a Codex record."""
+    def _extract_speaker(self, record: dict[str, Any], rec_type: str) -> str:
+        """Determine the speaker for a Codex record."""
         raw_role = record.get("role", "")
         if isinstance(raw_role, str):
             mapped = _CODEX_ROLE_MAP.get(raw_role.lower())
             if mapped:
                 return mapped
 
-        # Infer from record type
-        type_role_map: dict[str, str] = {
+        type_speaker_map: dict[str, str] = {
             "event_msg": "user",
             "input": "user",
             "command": "user",
@@ -256,7 +259,7 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
             "response": "assistant",
             "output": "assistant",
         }
-        return type_role_map.get(rec_type, "assistant")
+        return type_speaker_map.get(rec_type, "assistant")
 
     def _extract_timestamp(self, record: dict[str, Any]) -> str | None:
         """Pull a timestamp from a Codex record."""
@@ -277,11 +280,9 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
         content = record.get("content")
         message = record.get("message")
 
-        # Use 'message' field as content fallback
         if content is None and message is not None:
             content = message
 
-        # Handle reasoning / thinking blocks
         reasoning = record.get("reasoning") or record.get("thinking")
 
         # --- Structured content (list of blocks) -----------------------
@@ -331,11 +332,8 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
                         )
                 elif isinstance(item, str):
                     blocks.append(ContentBlock(type="text", text=item))
-            # Append reasoning as a separate thinking block
             if reasoning:
-                blocks.append(
-                    ContentBlock(type="text", text=f"[Reasoning] {reasoning}"),
-                )
+                blocks.append(ContentBlock(type="text", text=f"[Reasoning] {reasoning}"))
             return blocks if blocks else None
 
         # --- Dict content ----------------------------------------------
@@ -370,7 +368,6 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
             output = record.get("output", "") or record.get("stdout", "")
             return output if isinstance(output, str) else str(output)
 
-        # Fallback: try any string-valued field
         for key in ("text", "body", "data", "value"):
             val = record.get(key)
             if isinstance(val, str):
@@ -389,3 +386,17 @@ class CodexSkill(TranscriptSkill, JSONLSkillMixin):
         if rec_type == "session_meta":
             return "summary"
         return "message"
+
+    @staticmethod
+    def _concatenate_raw_text(messages: list[NormalizedMessage]) -> str:
+        """Join all message contents into a single raw text string."""
+        parts: list[str] = []
+        for m in messages:
+            if isinstance(m.content, str):
+                parts.append(f"{m.speaker or 'unknown'}: {m.content}")
+            elif isinstance(m.content, list):
+                text_parts = [b.text for b in m.content if hasattr(b, "text")]
+                parts.append(f"{m.speaker or 'unknown'}: {' '.join(text_parts)}")
+            else:
+                parts.append(f"{m.speaker or 'unknown'}: {str(m.content)}")
+        return "\n\n".join(parts)

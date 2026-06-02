@@ -99,9 +99,9 @@ class VibeSkill(TranscriptSkill):
         """Yield :class:`ExtractedTranscript` from a Vibe session JSON file."""
         path = path.resolve()
         result = ExtractedTranscript(
+            source_type="vibe",
             source_path=path,
-            skill_name=self.metadata().name,
-            messages=[],
+            skill_name="vibe",
             project_name=detect_project_name_from_path(path),
         )
 
@@ -113,13 +113,11 @@ class VibeSkill(TranscriptSkill):
         if path.is_dir():
             for json_file in sorted(path.glob("session_*.json")):
                 yield from self.extract_transcripts(json_file, **options)
-            # Also try any .json if no session_*.json found
             if not list(path.glob("session_*.json")):
                 for json_file in sorted(path.glob("*.json")):
                     yield from self.extract_transcripts(json_file, **options)
             return
 
-        # Parse the JSON file
         try:
             with path.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -137,7 +135,6 @@ class VibeSkill(TranscriptSkill):
             yield result
             return
 
-        # Extract session-level metadata
         result.session_id = data.get("session_id") or data.get("id")
         result.model = data.get("model") or data.get("model_name")
         result.started_at = parse_iso_timestamp(
@@ -152,16 +149,15 @@ class VibeSkill(TranscriptSkill):
             "messages", "conversation", "history", "turns",
         }}
 
-        # Extract messages
         messages = self._extract_messages(data)
         if messages is None:
             result.errors.append("No 'messages' or 'conversation' array found in JSON")
             yield result
             return
 
-        for msg in messages:
+        for idx, msg in enumerate(messages):
             result.raw_lines += 1
-            norm_msg = self._normalize_message(msg)
+            norm_msg = self._normalize_message(msg, idx)
             if norm_msg is not None:
                 result.messages.append(norm_msg)
                 result.parsed_lines += 1
@@ -169,6 +165,9 @@ class VibeSkill(TranscriptSkill):
                 result.warnings.append(
                     f"Could not normalise message at index {result.raw_lines}"
                 )
+
+        if result.messages:
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
@@ -225,22 +224,23 @@ class VibeSkill(TranscriptSkill):
     def _normalize_message(
         self,
         msg: dict[str, Any],
+        index: int,
     ) -> NormalizedMessage | None:
         """Convert a raw Vibe message dict into a :class:`NormalizedMessage`."""
         if not isinstance(msg, dict):
             return None
 
-        role = msg.get("role", "")
-        if isinstance(role, str):
-            role = role.lower()
-            if role in ("human", "user"):
-                role = "user"
-            elif role in ("ai", "assistant", "bot"):
-                role = "assistant"
-            elif role not in ("user", "assistant", "system", "tool"):
-                role = "assistant"  # default fallback
+        speaker = msg.get("role", "")
+        if isinstance(speaker, str):
+            speaker = speaker.lower()
+            if speaker in ("human", "user"):
+                speaker = "user"
+            elif speaker in ("ai", "assistant", "bot"):
+                speaker = "assistant"
+            elif speaker not in ("user", "assistant", "system", "tool"):
+                speaker = "assistant"
         else:
-            role = "assistant"
+            speaker = "assistant"
 
         content = msg.get("content")
         timestamp = parse_iso_timestamp(
@@ -249,15 +249,15 @@ class VibeSkill(TranscriptSkill):
         model = msg.get("model") or msg.get("model_name")
         msg_type = msg.get("type", "message")
 
-        # Normalise content
         normalised_content = self._normalise_content(content)
 
         if normalised_content is None:
             return None
 
         return NormalizedMessage(
-            role=role,
+            speaker=speaker,
             content=normalised_content,
+            sequence=index,
             timestamp=timestamp,
             message_type=msg_type if isinstance(msg_type, str) else "message",
             model=model,
@@ -325,3 +325,17 @@ class VibeSkill(TranscriptSkill):
             return str(content)
 
         return None
+
+    @staticmethod
+    def _concatenate_raw_text(messages: list[NormalizedMessage]) -> str:
+        """Join all message contents into a single raw text string."""
+        parts: list[str] = []
+        for m in messages:
+            if isinstance(m.content, str):
+                parts.append(f"{m.speaker or 'unknown'}: {m.content}")
+            elif isinstance(m.content, list):
+                text_parts = [b.text for b in m.content if hasattr(b, "text")]
+                parts.append(f"{m.speaker or 'unknown'}: {' '.join(text_parts)}")
+            else:
+                parts.append(f"{m.speaker or 'unknown'}: {str(m.content)}")
+        return "\n\n".join(parts)

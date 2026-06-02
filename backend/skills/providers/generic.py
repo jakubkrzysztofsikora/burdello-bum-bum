@@ -83,9 +83,9 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
         """Yield :class:`ExtractedTranscript` using heuristic parsing."""
         path = path.resolve()
         result = ExtractedTranscript(
+            source_type="generic",
             source_path=path,
-            skill_name=self.metadata().name,
-            messages=[],
+            skill_name="generic",
             project_name=detect_project_name_from_path(path),
         )
 
@@ -100,7 +100,6 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
                     yield from self.extract_transcripts(file, **options)
             return
 
-        # Dispatch based on extension
         if path.suffix == ".jsonl":
             yield from self._parse_jsonl(path, result)
         elif path.suffix == ".md":
@@ -156,6 +155,7 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
     ) -> Iterator[ExtractedTranscript]:
         """Heuristic JSONL parsing — look for message-like objects."""
         current_model: str | None = None
+        message_index = 0
 
         for record in self.read_jsonl_lines(path):
             result.raw_lines += 1
@@ -163,8 +163,7 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
             if not isinstance(record, dict):
                 continue
 
-            # Try to extract role
-            role = self._heuristic_extract_role(record)
+            speaker = self._heuristic_extract_speaker(record)
             content = self._heuristic_extract_content(record)
             timestamp = self._heuristic_extract_timestamp(record)
             model = record.get("model") or record.get("model_name")
@@ -176,18 +175,21 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
 
             result.messages.append(
                 NormalizedMessage(
-                    role=role,
+                    speaker=speaker,
                     content=content,
+                    sequence=message_index,
                     timestamp=timestamp,
                     model=current_model,
                 ),
             )
             result.parsed_lines += 1
+            message_index += 1
 
         result.model = current_model
         if result.messages:
-            result.started_at = result.messages[0].timestamp
-            result.ended_at = result.messages[-1].timestamp
+            result.started_at = str(result.messages[0].timestamp) if result.messages[0].timestamp else None
+            result.ended_at = str(result.messages[-1].timestamp) if result.messages[-1].timestamp else None
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
@@ -210,12 +212,13 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
 
         result.raw_lines = len(text.splitlines())
         messages = self.parse_markdown_conversation(text, source_path=path)
+        for idx, m in enumerate(messages):
+            m.sequence = idx
         result.messages.extend(messages)
         result.parsed_lines = len(messages)
 
         if result.messages:
-            result.started_at = result.messages[0].timestamp
-            result.ended_at = result.messages[-1].timestamp
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
@@ -238,8 +241,6 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
 
         result.raw_lines = len(lines)
 
-        # Try to detect alternating roles
-        # Strategy: look for prefix patterns, then fall back to alternating
         role_patterns: list[tuple[str, str]] = [
             (">>", "user"),
             ("<<", "assistant"),
@@ -250,23 +251,26 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
         ]
 
         messages: list[NormalizedMessage] = []
-        current_role: str | None = None
+        current_speaker: str | None = None
         current_lines: list[str] = []
         line_idx = 0
+        message_index = 0
 
         def _flush() -> None:
-            nonlocal current_role, current_lines
-            if current_role and current_lines:
+            nonlocal current_speaker, current_lines, message_index
+            if current_speaker and current_lines:
                 content = "\n".join(current_lines).strip()
                 if content:
                     messages.append(
                         NormalizedMessage(
-                            role=current_role,
+                            speaker=current_speaker,
                             content=content,
+                            sequence=message_index,
                             metadata={"line_index": line_idx},
                         ),
                     )
-            current_role = None
+                    message_index += 1
+            current_speaker = None
             current_lines = []
 
         for i, raw_line in enumerate(lines):
@@ -275,38 +279,35 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
             if not stripped:
                 continue
 
-            # Check for role prefix
-            detected_role: str | None = None
-            for prefix, role in role_patterns:
+            detected_speaker: str | None = None
+            for prefix, spk in role_patterns:
                 if stripped.upper().startswith(prefix):
-                    detected_role = role
+                    detected_speaker = spk
                     stripped = stripped[len(prefix) :].strip()
                     break
 
-            if detected_role is not None:
+            if detected_speaker is not None:
                 _flush()
-                current_role = detected_role
+                current_speaker = detected_speaker
                 current_lines.append(stripped)
-            elif current_role is not None:
+            elif current_speaker is not None:
                 current_lines.append(raw_line)
             else:
-                # No role detected yet — try to infer from line structure
-                # If it looks like a prompt marker, treat as user
                 if stripped.endswith("?") or stripped.endswith(":"):
-                    current_role = "user"
+                    current_speaker = "user"
                     current_lines.append(stripped)
 
         _flush()
 
-        # If no messages with prefixes found, try alternating lines
         if not messages:
             non_empty = [l.strip() for l in lines if l.strip()]
             for i, line in enumerate(non_empty):
-                role = "user" if i % 2 == 0 else "assistant"
+                speaker = "user" if i % 2 == 0 else "assistant"
                 messages.append(
                     NormalizedMessage(
-                        role=role,
+                        speaker=speaker,
                         content=line,
+                        sequence=i,
                         metadata={"line_index": i},
                     ),
                 )
@@ -315,8 +316,7 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
         result.parsed_lines = len(messages)
 
         if result.messages:
-            result.started_at = result.messages[0].timestamp
-            result.ended_at = result.messages[-1].timestamp
+            result.raw_text = self._concatenate_raw_text(result.messages)
 
         yield result
 
@@ -324,9 +324,9 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
     # Heuristic extractors
     # ------------------------------------------------------------------
 
-    def _heuristic_extract_role(self, record: dict[str, Any]) -> str:
-        """Best-effort role extraction from a dict."""
-        for key in ("role", "sender", "author", "speaker", "from", "user"):
+    def _heuristic_extract_speaker(self, record: dict[str, Any]) -> str:
+        """Best-effort speaker extraction from a dict."""
+        for key in ("role", "speaker", "sender", "author", "from", "user"):
             val = record.get(key)
             if isinstance(val, str):
                 val_lower = val.lower()
@@ -338,7 +338,6 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
                     return "system"
                 if val_lower == "tool":
                     return "tool"
-        # Check type field
         type_val = record.get("type", "")
         if isinstance(type_val, str):
             type_lower = type_val.lower()
@@ -346,7 +345,7 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
                 return "user"
             if type_lower in ("assistant_message", "response", "output", "reply"):
                 return "assistant"
-        return "assistant"  # default
+        return "assistant"
 
     def _heuristic_extract_content(
         self,
@@ -380,3 +379,17 @@ class GenericSkill(TranscriptSkill, JSONLSkillMixin, MarkdownSkillMixin):
                 if parsed:
                     return parsed
         return None
+
+    @staticmethod
+    def _concatenate_raw_text(messages: list[NormalizedMessage]) -> str:
+        """Join all message contents into a single raw text string."""
+        parts: list[str] = []
+        for m in messages:
+            if isinstance(m.content, str):
+                parts.append(f"{m.speaker or 'unknown'}: {m.content}")
+            elif isinstance(m.content, list):
+                text_parts = [b.text for b in m.content if hasattr(b, "text")]
+                parts.append(f"{m.speaker or 'unknown'}: {' '.join(text_parts)}")
+            else:
+                parts.append(f"{m.speaker or 'unknown'}: {str(m.content)}")
+        return "\n\n".join(parts)
