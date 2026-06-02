@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Search, Loader2 } from "lucide-react";
 import { useSearch } from "../hooks/useApi";
 
@@ -8,7 +9,12 @@ export function SearchPanel() {
   const [searchFilters] = useState<Record<string, unknown>>({});
   const [isSearching, setIsSearching] = useState(false);
 
-  const { data, isLoading, error } = useSearch(query, searchType, searchFilters, isSearching);
+  const { data, isLoading, error } = useSearch(
+    query,
+    searchType,
+    searchFilters,
+    isSearching,
+  );
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,7 +27,10 @@ export function SearchPanel() {
     <div className="space-y-4">
       <form onSubmit={handleSearch} className="flex gap-2">
         <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-bb-muted" />
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-bb-muted"
+          />
           <input
             type="text"
             value={query}
@@ -61,29 +70,39 @@ export function SearchPanel() {
             <span>{data.total} results</span>
           </div>
           {data.results.length === 0 ? (
-            <div className="py-8 text-center text-sm text-bb-muted">No results found</div>
+            <div className="py-8 text-center text-sm text-bb-muted">
+              No results found
+            </div>
           ) : (
             <div className="space-y-2">
               {data.results.map((r) => (
-                <div
-                  key={r.id}
-                  className="rounded-lg border border-bb-border bg-bb-card p-3 transition hover:border-bb-accent/50"
+                <Link
+                  key={r.chunk_id}
+                  to={`/transcripts/${r.transcript_id}`}
+                  className="block rounded-lg border border-bb-border bg-bb-card p-3 transition hover:border-bb-accent/50"
                 >
                   <div className="mb-1 flex items-center gap-2">
-                    <span className="text-xs font-mono text-bb-accent">{r.id}</span>
-                    <span className="text-xs text-bb-muted">score: {r.score.toFixed(3)}</span>
+                    <span className="text-xs text-bb-accent">
+                      Open transcript →
+                    </span>
+                    <span className="text-xs text-bb-muted">
+                      score: {r.score.toFixed(3)}
+                    </span>
                   </div>
-                  <p className="text-sm text-bb-text">{r.content}</p>
+                  <p className="text-sm text-bb-text">{r.text}</p>
                   {r.metadata && Object.keys(r.metadata).length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {Object.entries(r.metadata).map(([k, v]) => (
-                        <span key={k} className="rounded bg-bb-dark px-1.5 py-0.5 text-xs text-bb-muted">
+                        <span
+                          key={k}
+                          className="rounded bg-bb-dark px-1.5 py-0.5 text-xs text-bb-muted"
+                        >
                           {k}: {String(v)}
                         </span>
                       ))}
                     </div>
                   )}
-                </div>
+                </Link>
               ))}
             </div>
           )}

@@ -68,9 +68,10 @@ export interface Task {
 }
 
 export interface SearchResult {
-  id: string;
+  chunk_id: string;
+  transcript_id: string;
+  text: string;
   score: number;
-  content: string;
   metadata: Record<string, unknown>;
 }
 
