@@ -421,9 +421,13 @@ def mine_task(self, embed_result: dict[str, Any]) -> dict[str, Any]:
             )
             results = await engine.mine_transcript(transcript_id, text)
 
+            # Persist the mining output (projects/tasks/artifacts/raw rows).
+            counts = await storage.store_mining_results(transcript_id, results)
+            await db.commit()
+
             return {
                 "transcript_id": transcript_id_str,
-                "mining_results": results,
+                "stored": counts,
                 "status": "mined",
             }
 

@@ -13,7 +13,16 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.models import Chunk, Message, Source, Transcript
+from backend.core.models import (
+    Artifact,
+    Chunk,
+    Message,
+    MiningResult,
+    Project,
+    Source,
+    Task,
+    Transcript,
+)
 from backend.core.schemas import MessageCreate, TranscriptCreate
 from backend.search.engine import HybridSearchEngine
 
@@ -228,6 +237,162 @@ class PipelineStorage:
             )
         )
         return result.scalar_one_or_none() is not None
+
+    # Normalise LLM-provided status/priority strings to the values the UI
+    # (Kanban board, filters) expects, defaulting unknowns sensibly.
+    _TASK_STATUS_MAP = {
+        "todo": "todo",
+        "pending": "todo",
+        "not_started": "todo",
+        "in_progress": "in_progress",
+        "in-progress": "in_progress",
+        "doing": "in_progress",
+        "active": "in_progress",
+        "done": "done",
+        "completed": "done",
+        "complete": "done",
+        "cancelled": "cancelled",
+        "canceled": "cancelled",
+        "abandoned": "cancelled",
+    }
+    _PRIORITY_MAP = {
+        "low": "low",
+        "medium": "medium",
+        "normal": "medium",
+        "high": "high",
+        "urgent": "high",
+        "critical": "high",
+    }
+
+    async def store_mining_results(
+        self,
+        transcript_id: uuid.UUID,
+        results: dict[str, Any],
+    ) -> dict[str, int]:
+        """Persist LLM mining output as Project/Task/Artifact/MiningResult rows.
+
+        Projects are de-duplicated by name (get-or-create); tasks and
+        artifacts are linked to the transcript's primary project when one was
+        extracted. The raw per-miner output is also stored as MiningResult
+        rows for traceability.
+
+        Args:
+            transcript_id: UUID of the mined transcript.
+            results: Output of ``MiningEngine.mine_transcript``.
+
+        Returns:
+            Counts of rows created, keyed by entity type.
+        """
+        counts = {"projects": 0, "tasks": 0, "artifacts": 0, "mining_results": 0}
+
+        # --- Projects (get-or-create by name) ---
+        project_ids: dict[str, uuid.UUID] = {}
+        for proj_data in results.get("projects", []):
+            name = (proj_data.get("name") or "").strip()
+            if not name:
+                continue
+            if name in project_ids:
+                continue
+            existing = (
+                await self.db.execute(select(Project).where(Project.name == name))
+            ).scalar_one_or_none()
+            if existing is not None:
+                project_ids[name] = existing.id  # type: ignore[assignment]
+                continue
+            project = Project(
+                name=name,
+                description=proj_data.get("description"),
+                status=proj_data.get("status") or "active",
+                metadata_={"confidence": proj_data.get("confidence")},
+            )
+            self.db.add(project)
+            await self.db.flush()
+            project_ids[name] = project.id  # type: ignore[assignment]
+            counts["projects"] += 1
+
+        primary_project_id = next(iter(project_ids.values()), None)
+
+        # --- Tasks ---
+        for task_data in results.get("tasks", []):
+            title = (task_data.get("title") or "").strip()
+            if not title:
+                continue
+            status = self._TASK_STATUS_MAP.get(
+                str(task_data.get("status", "")).lower(), "todo"
+            )
+            priority = self._PRIORITY_MAP.get(
+                str(task_data.get("priority", "")).lower(), "medium"
+            )
+            self.db.add(
+                Task(
+                    project_id=primary_project_id,
+                    title=title,
+                    description=task_data.get("description"),
+                    status=status,
+                    priority=priority,
+                    source_transcript_id=transcript_id,
+                    metadata_={"confidence": task_data.get("confidence")},
+                )
+            )
+            counts["tasks"] += 1
+
+        # --- Artifacts ---
+        for art_data in results.get("artifacts", []):
+            name = (art_data.get("name") or "").strip()
+            if not name:
+                continue
+            self.db.add(
+                Artifact(
+                    project_id=primary_project_id,
+                    artifact_type=art_data.get("type") or "unknown",
+                    name=name,
+                    content={
+                        "language": art_data.get("language"),
+                        "content_preview": art_data.get("content_preview"),
+                        "file_path": art_data.get("file_path"),
+                    },
+                    source_transcript_id=transcript_id,
+                    metadata_={"confidence": art_data.get("confidence")},
+                )
+            )
+            counts["artifacts"] += 1
+
+        # --- Raw per-miner results (traceability) ---
+        status_block = results.get("status", {}) or {}
+        miner_payloads: dict[str, dict[str, Any]] = {
+            "projects": {"items": results.get("projects", [])},
+            "tasks": {"items": results.get("tasks", [])},
+            "status": status_block,
+            "artifacts": {"items": results.get("artifacts", [])},
+            "missing_elements": {"items": results.get("missing_elements", [])},
+            "abandoned_work": results.get("abandoned_work", {}) or {},
+        }
+        for miner_type, payload in miner_payloads.items():
+            confidence = payload.get("confidence")
+            self.db.add(
+                MiningResult(
+                    transcript_id=transcript_id,
+                    miner_type=miner_type,
+                    result_data=payload,
+                    confidence=(
+                        float(confidence)
+                        if isinstance(confidence, (int, float))
+                        else None
+                    ),
+                    metadata_={},
+                )
+            )
+            counts["mining_results"] += 1
+
+        await self.db.flush()
+        logger.info(
+            "store_mining_results: %s -> %d projects, %d tasks, %d artifacts",
+            transcript_id,
+            counts["projects"],
+            counts["tasks"],
+            counts["artifacts"],
+        )
+        return counts
 
     async def get_transcript_text(self, transcript_id: uuid.UUID) -> str:
         """Fetch the full concatenated text of a transcript.
