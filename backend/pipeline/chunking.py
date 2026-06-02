@@ -74,7 +74,7 @@ class SemanticChunker:
         # encodes — minutes for transcripts with thousands of utterances.
         # Above this cap, fall back to fast size-based grouping (chunk vectors
         # are still produced later by the embedder).
-        self.max_semantic_utterances = 300
+        self.max_semantic_utterances = 30
 
     def split_into_utterances(self, text: str) -> list[str]:
         """Split transcript text into speaker-delimited utterances.
