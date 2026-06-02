@@ -20,6 +20,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     networks:
       - bb-network
 
@@ -41,6 +45,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     networks:
       - bb-network
 
@@ -50,6 +58,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: bb-redis
+    command: >
+      redis-server
+      --maxmemory 384mb
+      --maxmemory-policy allkeys-lru
+      --save ""
     ports:
       - "6379:6379"
     volumes:
@@ -59,6 +72,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     networks:
       - bb-network
 
@@ -92,6 +109,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2g
     networks:
       - bb-network
     restart: unless-stopped
@@ -109,6 +130,8 @@ services:
       celery -A backend.pipeline.celery_app worker
       --loglevel=info
       --concurrency=2
+      --max-tasks-per-child=20
+      --max-memory-per-child=1048576
       -n worker@%h
     environment:
       DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
@@ -129,6 +152,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 3g
     networks:
       - bb-network
     restart: unless-stopped
@@ -153,6 +180,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     networks:
       - bb-network
     restart: unless-stopped
