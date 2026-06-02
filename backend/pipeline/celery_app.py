@@ -34,4 +34,10 @@ celery_app.conf.update(
     # Don't let chain/task results linger in Redis for the 24h default — they
     # accumulate and pressure the broker. 30 min is ample for the pipeline.
     result_expires=1800,
+    # Mining is I/O-bound (LLM calls) and uses no embedding model, so route it
+    # to a dedicated queue served by a separate high-concurrency worker. The
+    # CPU/memory-bound extract->embed stages stay on the default queue.
+    task_routes={
+        "backend.pipeline.tasks.mine_task": {"queue": "mining"},
+    },
 )

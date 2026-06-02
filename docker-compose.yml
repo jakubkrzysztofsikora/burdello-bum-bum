@@ -189,10 +189,55 @@ services:
     deploy:
       resources:
         limits:
-          # Room for 2 worker children each holding the resident embedding
-          # model (~1-2GB) plus transient encode/mining memory.
-          memory: 4500m
+          # Embedding worker (concurrency=1) holding the resident model plus
+          # transient encode memory, sized to leave room for the mining worker.
+          memory: 4000m
     # litellm is a Tailscale node (100.114.245.86 / litellm.tail5d39b4.ts.net).
+    extra_hosts:
+      - "litellm:100.114.245.86"
+    networks:
+      - bb-network
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # Celery mining worker — I/O-bound LLM mining only (queue: mining).
+  # No embedding model is loaded here, so it stays light and runs many
+  # LLM calls concurrently, collapsing the serial mining tail.
+  # ------------------------------------------------------------------
+  celery-mining:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: bb-celery-mining
+    command: >
+      python -m celery -A backend.pipeline.celery_app worker
+      -Q mining
+      --loglevel=info
+      --concurrency=6
+      --max-tasks-per-child=200
+      -n mining@%h
+    volumes:
+      - ./backend:/app/backend
+    healthcheck:
+      disable: true
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/1"
+      LITELLM_URL: "${LITELLM_URL:-http://litellm}"
+      LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
+      BB_LOG_LEVEL: "INFO"
+      BB_MINING_MODEL: "${BB_MINING_MODEL:-claude-haiku-4-5-20251001}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1500m
     extra_hosts:
       - "litellm:100.114.245.86"
     networks:
