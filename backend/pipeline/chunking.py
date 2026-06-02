@@ -70,6 +70,11 @@ class SemanticChunker:
         self.model = get_sentence_transformer(resolved_model)
         self.threshold = similarity_threshold
         self.max_size = max_chunk_size or settings.BB_CHUNK_SIZE
+        # Embedding every utterance to find semantic boundaries is O(n) model
+        # encodes — minutes for transcripts with thousands of utterances.
+        # Above this cap, fall back to fast size-based grouping (chunk vectors
+        # are still produced later by the embedder).
+        self.max_semantic_utterances = 300
 
     def split_into_utterances(self, text: str) -> list[str]:
         """Split transcript text into speaker-delimited utterances.
@@ -145,6 +150,11 @@ class SemanticChunker:
         if not utterances:
             return []
 
+        # Fast path for very large transcripts: skip per-utterance embedding
+        # (the expensive part) and group purely by size.
+        if len(utterances) > self.max_semantic_utterances:
+            return self._size_based_chunks(utterances, metadata)
+
         # Embed all utterances
         embeddings = self.model.encode(utterances, normalize_embeddings=True)
 
@@ -197,6 +207,60 @@ class SemanticChunker:
 
         logger.info(
             "create_chunks: %d utterances -> %d chunks",
+            len(utterances),
+            len(chunks),
+        )
+        return chunks
+
+    def _size_based_chunks(
+        self,
+        utterances: list[str],
+        metadata: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Group consecutive utterances by ``max_size`` only (no embedding).
+
+        Used for very large transcripts where per-utterance semantic
+        boundary detection would be prohibitively slow.
+        """
+        chunks: list[dict[str, Any]] = []
+        current_texts: list[str] = []
+        current_start = 0
+
+        for i, utterance in enumerate(utterances):
+            if current_texts and len("\n".join(current_texts + [utterance])) > self.max_size:
+                chunks.append(
+                    {
+                        "text": "\n".join(current_texts),
+                        "start_idx": current_start,
+                        "end_idx": i - 1,
+                        "metadata": {
+                            **(metadata or {}),
+                            "utterance_count": len(current_texts),
+                            "chunking": "size_based",
+                        },
+                    }
+                )
+                current_texts = [utterance]
+                current_start = i
+            else:
+                current_texts.append(utterance)
+
+        if current_texts:
+            chunks.append(
+                {
+                    "text": "\n".join(current_texts),
+                    "start_idx": current_start,
+                    "end_idx": len(utterances) - 1,
+                    "metadata": {
+                        **(metadata or {}),
+                        "utterance_count": len(current_texts),
+                        "chunking": "size_based",
+                    },
+                }
+            )
+
+        logger.info(
+            "create_chunks (size-based): %d utterances -> %d chunks",
             len(utterances),
             len(chunks),
         )
