@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from backend.core.config import get_settings
 from backend.core.models import Base
@@ -24,13 +25,17 @@ _settings = get_settings()
 # Engine & Session
 # ---------------------------------------------------------------------------
 
+# NullPool: do not reuse asyncpg connections across event loops. The Celery
+# pipeline tasks each run `asyncio.run(...)` (a fresh loop per task), and a
+# pooled connection bound to a previous loop raises
+# "got Future attached to a different loop". NullPool opens/closes a fresh
+# connection per session within the current loop, which is correct for both
+# the single-loop API process and the prefork Celery workers.
 async_engine = create_async_engine(
     _settings.DATABASE_URL,
     echo=False,
     future=True,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    poolclass=NullPool,
 )
 
 AsyncSessionLocal = async_sessionmaker(
