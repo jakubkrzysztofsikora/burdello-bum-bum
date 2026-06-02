@@ -40,8 +40,9 @@ services:
       - qdrant_data:/qdrant/storage
     environment:
       QDRANT__SERVICE__GRPC_PORT: 6334
+    # Qdrant's image ships no curl/wget; bash supports /dev/tcp for a TCP liveness probe.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -88,8 +89,15 @@ services:
       dockerfile: Dockerfile
       target: production
     container_name: bb-backend
+    # Invoke via `python -m` so it does not depend on the venv console-script
+    # shebang (kept correct by the Dockerfile, but this is rebuild-independent).
+    command: ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8000:8000"
+    # Live source mount: picks up backend code changes without an image rebuild
+    # (the image's editable install resolves backend.* from /app/backend).
+    volumes:
+      - ./backend:/app/backend
     environment:
       DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
       QDRANT_URL: "http://qdrant:6333"
@@ -113,6 +121,10 @@ services:
       resources:
         limits:
           memory: 2g
+    # litellm is a Tailscale node (100.114.245.86 / litellm.tail5d39b4.ts.net).
+    # Map the bare hostname so LITELLM_URL=http://litellm resolves in-container.
+    extra_hosts:
+      - "litellm:100.114.245.86"
     networks:
       - bb-network
     restart: unless-stopped
@@ -127,12 +139,17 @@ services:
       target: production
     container_name: bb-celery-worker
     command: >
-      celery -A backend.pipeline.celery_app worker
+      python -m celery -A backend.pipeline.celery_app worker
       --loglevel=info
       --concurrency=2
       --max-tasks-per-child=20
       --max-memory-per-child=1048576
       -n worker@%h
+    volumes:
+      - ./backend:/app/backend
+    # The image HEALTHCHECK curls :8000 (the API); a worker doesn't serve it.
+    healthcheck:
+      disable: true
     environment:
       DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
       QDRANT_URL: "http://qdrant:6333"
@@ -156,6 +173,9 @@ services:
       resources:
         limits:
           memory: 3g
+    # litellm is a Tailscale node (100.114.245.86 / litellm.tail5d39b4.ts.net).
+    extra_hosts:
+      - "litellm:100.114.245.86"
     networks:
       - bb-network
     restart: unless-stopped
@@ -170,9 +190,14 @@ services:
       target: production
     container_name: bb-celery-beat
     command: >
-      celery -A backend.pipeline.celery_app beat
+      python -m celery -A backend.pipeline.celery_app beat
       --loglevel=info
       --scheduler celery.beat.PersistentScheduler
+    volumes:
+      - ./backend:/app/backend
+    # The image HEALTHCHECK curls :8000 (the API); beat doesn't serve it.
+    healthcheck:
+      disable: true
     environment:
       DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
       CELERY_BROKER_URL: "redis://redis:6379/1"

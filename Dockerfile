@@ -15,8 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies into a virtual environment
-ENV VIRTUAL_ENV=/build/.venv
+# Install dependencies into a virtual environment at its FINAL path so the
+# console-script shebangs (#!/opt/venv/bin/python) remain valid after being
+# copied into the production stage. Building at /build/.venv and copying to
+# /opt/venv leaves dangling shebangs and breaks `uvicorn`/`celery` at runtime.
+ENV VIRTUAL_ENV=/opt/venv
 RUN python -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
@@ -37,8 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy virtual environment from builder
-COPY --from=builder /build/.venv /opt/venv
+# Copy virtual environment from builder (same path → shebangs stay valid)
+COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
@@ -70,7 +73,7 @@ FROM builder AS development
 
 WORKDIR /app
 
-ENV PATH="/build/.venv/bin:$PATH"
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Install dev tools directly in the builder venv
 RUN pip install --no-cache-dir ruff mypy pytest pytest-asyncio pytest-cov
