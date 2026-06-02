@@ -78,6 +78,23 @@ def _get_embedding_engine() -> EmbeddingEngine:
     return _embedding_engine
 
 
+# Reuse one QdrantClient per worker process; constructing HybridSearchEngine
+# per task does a health-check round-trip to Qdrant every time.
+_search_engine: HybridSearchEngine | None = None
+
+
+def _get_search_engine() -> HybridSearchEngine:
+    """Return a process-wide, lazily-constructed hybrid search engine."""
+    global _search_engine
+    if _search_engine is None:
+        settings = get_settings()
+        _search_engine = HybridSearchEngine(
+            qdrant_url=settings.QDRANT_URL,
+            collection_name=settings.QDRANT_COLLECTION,
+        )
+    return _search_engine
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def process_source(self, source_path: str, provider_hint: str | None = None) -> dict[str, Any]:
     """Run the full processing pipeline on a single source file.
@@ -214,13 +231,8 @@ def normalize_task(self, extraction_result: dict[str, Any]) -> dict[str, Any]:
 
     async def _normalize() -> dict[str, Any]:
         async with AsyncSessionLocal() as db:
-            # Build search engine
-            settings = get_settings()
-            search_engine = HybridSearchEngine(
-                qdrant_url=settings.QDRANT_URL,
-                collection_name=settings.QDRANT_COLLECTION,
-            )
-            storage = PipelineStorage(db=db, search_engine=search_engine)
+            # Build search engine (cached per process)
+            storage = PipelineStorage(db=db, search_engine=_get_search_engine())
 
             # Compute file hash for dedup
             from backend.pipeline.discovery import SourceDiscovery
@@ -315,7 +327,6 @@ def chunk_task(self, normalize_result: dict[str, Any]) -> dict[str, Any]:
 
     async def _chunk() -> dict[str, Any]:
         async with AsyncSessionLocal() as db:
-            settings = get_settings()
             storage = PipelineStorage(db=db)
 
             # Fetch transcript text
@@ -371,12 +382,7 @@ def embed_task(self, chunk_result: dict[str, Any]) -> dict[str, Any]:
 
     async def _embed() -> dict[str, Any]:
         async with AsyncSessionLocal() as db:
-            settings = get_settings()
-            search_engine = HybridSearchEngine(
-                qdrant_url=settings.QDRANT_URL,
-                collection_name=settings.QDRANT_COLLECTION,
-            )
-            storage = PipelineStorage(db=db, search_engine=search_engine)
+            storage = PipelineStorage(db=db, search_engine=_get_search_engine())
 
             # Generate embeddings (model cached per process)
             engine = _get_embedding_engine()
