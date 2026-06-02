@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -362,16 +363,27 @@ class MiningEngine:
                 logger.warning("_call_llm: empty response content")
                 return {} if response_schema and response_schema.get("type") == "object" else []
 
+            # Models (notably Claude) often wrap JSON in a ```json ... ``` fence
+            # even in json_object mode; strip it before parsing.
+            content = content.strip()
+            if content.startswith("```"):
+                content = re.sub(r"^```[a-zA-Z0-9]*\s*", "", content)
+                content = re.sub(r"\s*```$", "", content).strip()
+
             # Parse JSON response
             parsed = json.loads(content)
 
-            # If the model wrapped the result in an extra key, unwrap it
-            if isinstance(parsed, dict) and response_schema:
-                schema_type = response_schema.get("type")
-                if schema_type == "array" and "items" in parsed:
-                    for key in parsed:
-                        if isinstance(parsed[key], list):
-                            return parsed[key]
+            # If an array was requested but the model wrapped it in an object
+            # (e.g. {"projects": [...]}), return the first list value found.
+            if (
+                isinstance(parsed, dict)
+                and response_schema
+                and response_schema.get("type") == "array"
+            ):
+                for value in parsed.values():
+                    if isinstance(value, list):
+                        return value
+                return []
 
             return parsed
 

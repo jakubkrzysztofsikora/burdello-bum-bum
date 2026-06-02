@@ -115,6 +115,7 @@ services:
       LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
       BB_LOG_LEVEL: "INFO"
       BB_EMBEDDING_MODEL: "${BB_EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
+      BB_MINING_MODEL: "${BB_MINING_MODEL:-claude-haiku-4-5-20251001}"
       BB_CHUNK_SIZE: "512"
       BB_CHUNK_OVERLAP: "50"
     depends_on:
@@ -173,6 +174,7 @@ services:
       LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
       BB_LOG_LEVEL: "INFO"
       BB_EMBEDDING_MODEL: "${BB_EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
+      BB_MINING_MODEL: "${BB_MINING_MODEL:-claude-haiku-4-5-20251001}"
       BB_CHUNK_SIZE: "512"
       BB_CHUNK_OVERLAP: "50"
     depends_on:
