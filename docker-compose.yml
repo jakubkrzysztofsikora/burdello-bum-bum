@@ -114,7 +114,7 @@ services:
       LITELLM_URL: "${LITELLM_URL:-http://litellm}"
       LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
       BB_LOG_LEVEL: "INFO"
-      BB_EMBEDDING_MODEL: "nomic-embed-text-v2"
+      BB_EMBEDDING_MODEL: "${BB_EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
       BB_CHUNK_SIZE: "512"
       BB_CHUNK_OVERLAP: "50"
     depends_on:
@@ -172,7 +172,7 @@ services:
       LITELLM_URL: "${LITELLM_URL:-http://litellm}"
       LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
       BB_LOG_LEVEL: "INFO"
-      BB_EMBEDDING_MODEL: "nomic-embed-text-v2"
+      BB_EMBEDDING_MODEL: "${BB_EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
       BB_CHUNK_SIZE: "512"
       BB_CHUNK_OVERLAP: "50"
     depends_on:
