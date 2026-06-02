@@ -11,6 +11,8 @@ from typing import Any
 
 import numpy as np
 
+from backend.core.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -18,13 +20,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _model: Any | None = None
-_model_name: str = "nomic-ai/nomic-embed-text-v2-moe"
 
 
 def _get_model() -> Any:
     """Return the cached sentence-transformers model, loading if necessary.
 
-    Uses lazy initialisation to avoid heavy import / load at module level.
+    Uses the SAME model as the ingestion pipeline (``BB_EMBEDDING_MODEL``) so
+    query vectors live in the same space as the stored chunk embeddings. Lazy
+    initialisation avoids a heavy import / load at module level.
 
     Returns:
         A ``SentenceTransformer`` model instance.
@@ -34,8 +37,9 @@ def _get_model() -> Any:
     if _model is None:
         from sentence_transformers import SentenceTransformer
 
-        logger.info("Loading embedding model: %s", _model_name)
-        _model = SentenceTransformer(_model_name, trust_remote_code=True)
+        model_name = get_settings().BB_EMBEDDING_MODEL
+        logger.info("Loading embedding model: %s", model_name)
+        _model = SentenceTransformer(model_name, trust_remote_code=True)
         logger.info("Embedding model loaded successfully")
 
     return _model

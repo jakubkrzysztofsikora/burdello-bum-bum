@@ -78,9 +78,9 @@ class HybridSearchEngine:
         query_vector = await get_embedding(query)
         qdrant_filter = self._build_filter(filters) if filters else None
 
-        results = self.client.search(
+        response = self.client.query_points(
             collection_name=self.collection,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=qdrant_filter,
             limit=limit,
             offset=offset,
@@ -88,7 +88,7 @@ class HybridSearchEngine:
         )
 
         search_results: list[SearchResult] = []
-        for scored_point in results:
+        for scored_point in response.points:
             payload = scored_point.payload or {}
             search_results.append(
                 SearchResult(
@@ -149,15 +149,15 @@ class HybridSearchEngine:
             return []
 
         reference_vector = points[0].vector
-        results = self.client.search(
+        response = self.client.query_points(
             collection_name=self.collection,
-            query_vector=reference_vector,  # type: ignore[arg-type]
+            query=reference_vector,  # type: ignore[arg-type]
             limit=limit + 1,  # +1 to filter out the query itself
             with_payload=True,
         )
 
         search_results: list[SearchResult] = []
-        for scored_point in results:
+        for scored_point in response.points:
             # Exclude the reference transcript itself
             payload = scored_point.payload or {}
             if payload.get("transcript_id") == transcript_id:
