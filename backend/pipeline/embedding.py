@@ -34,10 +34,10 @@ class EmbeddingEngine:
         settings = get_settings()
         resolved_model = model_name or settings.BB_EMBEDDING_MODEL
 
-        # Lazy import to avoid heavy module-level load
-        from sentence_transformers import SentenceTransformer
+        # Shared per-process model (chunker + embedder reuse one instance).
+        from backend.pipeline.model_cache import get_sentence_transformer
 
-        self.model = SentenceTransformer(resolved_model, trust_remote_code=True)
+        self.model = get_sentence_transformer(resolved_model)
         self.dimension = 768
 
     def embed(self, text: str) -> list[float]:
