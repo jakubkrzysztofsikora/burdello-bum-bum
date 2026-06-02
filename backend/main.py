@@ -19,6 +19,7 @@ from backend.core.config import get_settings
 from backend.core.database import get_db, init_db
 from backend.core.models import (
     Artifact,
+    Message,
     Project,
     Source,
     Task,
@@ -151,21 +152,31 @@ async def health_check() -> HealthResponse:
 async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     """Return global platform statistics.
 
-    Counts rows in the major tables: sources, transcripts, projects,
-    tasks, artifacts, and chunks.
+    Counts rows in the major tables and computes provider (source type)
+    and transcript status breakdowns for the dashboard charts.
     """
-    tables = [
-        ("sources_count", Source),
-        ("transcripts_count", Transcript),
-        ("projects_count", Project),
-        ("tasks_count", Task),
-        ("artifacts_count", Artifact),
-    ]
+    counts = {
+        "total_sources": Source,
+        "total_transcripts": Transcript,
+        "total_projects": Project,
+        "total_tasks": Task,
+        "total_artifacts": Artifact,
+        "total_messages": Message,
+    }
 
-    stats: dict[str, Any] = {"chunks_count": 0}
-
-    for key, model in tables:
+    stats: dict[str, Any] = {}
+    for key, model in counts.items():
         result = await db.execute(select(func.count(model.id)))
         stats[key] = result.scalar() or 0
+
+    provider_result = await db.execute(
+        select(Source.source_type, func.count(Source.id)).group_by(Source.source_type)
+    )
+    stats["provider_breakdown"] = {k: v for k, v in provider_result.all()}
+
+    status_result = await db.execute(
+        select(Transcript.status, func.count(Transcript.id)).group_by(Transcript.status)
+    )
+    stats["status_breakdown"] = {k: v for k, v in status_result.all()}
 
     return StatsResponse(**stats)

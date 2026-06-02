@@ -416,14 +416,16 @@ class TodoistExportResponse(BaseModel):
 
 
 class StatsResponse(BaseModel):
-    """Global platform statistics."""
+    """Global platform statistics (matches the frontend Stats contract)."""
 
-    sources_count: int
-    transcripts_count: int
-    projects_count: int
-    tasks_count: int
-    artifacts_count: int
-    chunks_count: int
+    total_sources: int
+    total_transcripts: int
+    total_projects: int
+    total_tasks: int
+    total_artifacts: int
+    total_messages: int
+    provider_breakdown: dict[str, int]
+    status_breakdown: dict[str, int]
 
 
 # ===========================================================================

@@ -12,7 +12,13 @@ export default defineConfig({
     host: true,
     port: 3000,
     proxy: {
-      "/api": apiTarget,
+      // Keep the browser's Host header (changeOrigin: false) so FastAPI's
+      // trailing-slash 307 redirects resolve back to localhost:3000 instead
+      // of leaking the internal "backend" Docker hostname to the browser.
+      "/api": {
+        target: apiTarget,
+        changeOrigin: false,
+      },
     },
   },
 });
