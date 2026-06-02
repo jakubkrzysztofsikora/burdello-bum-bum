@@ -151,7 +151,7 @@ services:
     command: >
       python -m celery -A backend.pipeline.celery_app worker
       --loglevel=info
-      --concurrency=2
+      --concurrency=1
       --max-tasks-per-child=100
       --max-memory-per-child=3000000
       -n worker@%h
