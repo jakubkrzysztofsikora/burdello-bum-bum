@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from backend.pipeline.discovery import SourceDiscovery
 from backend.pipeline.tasks import process_source
@@ -70,13 +70,11 @@ async def trigger_ingest(
 @router.post("/upload")
 async def upload_transcript(
     file: UploadFile = File(..., description="Transcript file to upload"),
-    background_tasks: BackgroundTasks | None = None,
 ) -> dict[str, Any]:
     """Save an uploaded file and process it through the pipeline.
 
     Args:
         file: Uploaded file.
-        background_tasks: FastAPI background tasks for async processing.
 
     Returns:
         Dict with source ID, file path, and processing status.

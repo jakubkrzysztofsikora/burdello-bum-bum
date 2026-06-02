@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -81,4 +82,6 @@ async def init_db() -> None:
     via ``Base.metadata.create_all`` using the async engine.
     """
     async with async_engine.begin() as conn:
+        # pgvector must exist before create_all builds VECTOR columns.
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)

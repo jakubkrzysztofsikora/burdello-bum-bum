@@ -27,15 +27,16 @@ async def list_skills() -> list[dict[str, Any]]:
         description, and enabled status.
     """
     registry = SkillRegistry()
+    registry.discover_builtin_skills()
     return [
         {
-            "name": s.name,
-            "version": s.version,
-            "display_name": s.display_name,
-            "description": s.description,
-            "enabled": s.enabled,
+            "name": m.name,
+            "version": m.version,
+            "display_name": m.display_name,
+            "description": m.description,
+            "enabled": m.enabled,
         }
-        for s in registry.skills
+        for m in registry.list_skills()
     ]
 
 

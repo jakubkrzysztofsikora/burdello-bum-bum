@@ -49,6 +49,13 @@ class SourceResponse(BaseModel):
     updated_at: datetime
 
 
+class SourceListResponse(BaseModel):
+    """Paginated list of sources (matches the /sources list endpoint payload)."""
+
+    total: int
+    items: list[SourceResponse]
+
+
 # ===========================================================================
 # Message Schemas
 # ===========================================================================
