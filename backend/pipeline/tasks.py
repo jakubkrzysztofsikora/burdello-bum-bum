@@ -473,7 +473,7 @@ def chunk_embed_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         raise self.retry(exc=exc) from exc
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+@shared_task(bind=True, max_retries=100, default_retry_delay=90)
 def mine_task(self, embed_result: dict[str, Any]) -> dict[str, Any]:
     """Run LLM data mining on a transcript.
 
