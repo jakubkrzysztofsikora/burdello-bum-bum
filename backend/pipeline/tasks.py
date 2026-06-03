@@ -242,18 +242,29 @@ def normalize_task(self, extraction_result: dict[str, Any]) -> dict[str, Any]:
             # Skip if already processed (idempotency)
             if await storage.source_exists(file_hash):
                 logger.info("normalize_task: source already exists (hash=%s)", file_hash)
-                # Find existing source and transcript
+                # Find existing source + transcript via explicit queries — async
+                # SQLAlchemy can't lazy-load `Source.transcripts` outside the
+                # greenlet context, so resolve the transcript_id directly.
                 from sqlalchemy import select
-                from backend.core.models import Source
-                result = await db.execute(
-                    select(Source).where(
-                        Source.metadata_["file_hash"].as_string() == file_hash
+                from backend.core.models import Source, Transcript
+                source_row = (
+                    await db.execute(
+                        select(Source.id).where(
+                            Source.metadata_["file_hash"].as_string() == file_hash
+                        )
                     )
-                )
-                existing = result.scalar_one()
+                ).scalar_one()
+                transcript_id_row = (
+                    await db.execute(
+                        select(Transcript.id)
+                        .where(Transcript.source_id == source_row)
+                        .order_by(Transcript.created_at.asc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
                 return {
-                    "transcript_id": str(existing.transcripts[0].id) if existing.transcripts else None,
-                    "source_id": str(existing.id),
+                    "transcript_id": str(transcript_id_row) if transcript_id_row else None,
+                    "source_id": str(source_row),
                     "status": "skipped",
                     "reason": "already_exists",
                 }
