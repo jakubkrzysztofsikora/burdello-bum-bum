@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Layers, FileCode } from "lucide-react";
 import { useArtifacts } from "../hooks/useApi";
 
@@ -48,9 +49,10 @@ export function Artifacts() {
             const preview = (content.content_preview as string) || "";
             const language = (content.language as string) || "";
             return (
-              <div
+              <Link
                 key={a.id}
-                className="rounded-lg border border-bb-border bg-bb-surface p-3"
+                to={`/artifacts/${a.id}`}
+                className="block rounded-lg border border-bb-border bg-bb-surface p-3 transition hover:border-bb-accent/50"
               >
                 <div className="mb-1 flex items-center gap-2">
                   <FileCode size={14} className="shrink-0 text-bb-accent" />
@@ -76,7 +78,7 @@ export function Artifacts() {
                     {preview}
                   </p>
                 )}
-              </div>
+              </Link>
             );
           })}
         </div>

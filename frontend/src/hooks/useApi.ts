@@ -80,6 +80,15 @@ export function useArtifacts(params?: FilterParams) {
   });
 }
 
+export function useArtifact(id: string) {
+  return useQuery<Artifact, Error>({
+    queryKey: ["artifact", id],
+    queryFn: () => api.getArtifact(id),
+    enabled: !!id,
+    staleTime: STALE_TIME,
+  });
+}
+
 export function useUpdateTaskStatus() {
   const qc = useQueryClient();
   return useMutation({

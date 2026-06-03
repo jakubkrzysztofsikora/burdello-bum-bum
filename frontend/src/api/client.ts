@@ -93,6 +93,8 @@ export const api = {
     params?: FilterParams,
   ): Promise<{ items: Artifact[]; total: number }> =>
     fetchJson(`${API_BASE}/artifacts?${buildQuery(params)}`),
+  getArtifact: (id: string): Promise<Artifact> =>
+    fetchJson(`${API_BASE}/artifacts/${id}`),
 
   // Search
   search: (
