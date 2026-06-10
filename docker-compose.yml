@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # ------------------------------------------------------------------
   # PostgreSQL with pgvector extension
@@ -11,8 +9,6 @@ services:
       POSTGRES_USER: bbuser
       POSTGRES_PASSWORD: bbpass
       POSTGRES_DB: burdello
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -65,7 +61,7 @@ services:
       --maxmemory-policy noeviction
       --save ""
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -117,9 +113,10 @@ services:
       LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
       BB_LOG_LEVEL: "INFO"
       BB_EMBEDDING_MODEL: "${BB_EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
-      BB_MINING_MODEL: "${BB_MINING_MODEL:-claude-haiku-4-5-20251001}"
+      BB_MINING_MODEL: "${BB_MINING_MODEL:-kimi}"
       BB_CHUNK_SIZE: "512"
       BB_CHUNK_OVERLAP: "50"
+      MCP_BRIDGE_TOKEN: "${MCP_BRIDGE_TOKEN:-}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -151,7 +148,7 @@ services:
     command: >
       python -m celery -A backend.pipeline.celery_app worker
       --loglevel=info
-      --concurrency=1
+      --concurrency=3
       --max-tasks-per-child=100
       --max-memory-per-child=3000000
       -n worker@%h
@@ -205,8 +202,10 @@ services:
   # LLM calls concurrently, collapsing the serial mining tail.
   # ------------------------------------------------------------------
   celery-mining:
-    # Reuse the worker image (same code); mining loads no extra deps.
-    image: burdello-bum-bum-celery-worker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
     container_name: bb-celery-mining
     command: >
       python -m celery -A backend.pipeline.celery_app worker
@@ -226,7 +225,7 @@ services:
       LITELLM_URL: "${LITELLM_URL:-http://litellm}"
       LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
       BB_LOG_LEVEL: "INFO"
-      BB_MINING_MODEL: "${BB_MINING_MODEL:-claude-haiku-4-5-20251001}"
+      BB_MINING_MODEL: "${BB_MINING_MODEL:-kimi}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -288,7 +287,7 @@ services:
       # Vite proxies /api to the backend service over the compose network.
       VITE_API_PROXY: "http://backend:8000"
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - ./frontend:/app
       # Container-built node_modules (linux) shadow any host (darwin) ones.
@@ -302,6 +301,30 @@ services:
     networks:
       - bb-network
     restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # Cloudflare Tunnel — exposes the backend at bb-api.jakub.team so the
+  # Cloudflare Worker (burdello-mcp.jakub.team) can call the bearer-auth
+  # MCP routes. Token comes from the Cloudflare dashboard:
+  #   Zero Trust → Networks → Tunnels → Create tunnel → "Run a connector".
+  # Paste the token into .env as CLOUDFLARE_TUNNEL_TOKEN. Then add a public
+  # hostname `bb-api.jakub.team` → service `http://bb-backend:8000` in the
+  # tunnel's UI.
+  # Start only when needed: docker compose --profile tunnel up -d cloudflared
+  # ------------------------------------------------------------------
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: bb-cloudflared
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: "${CLOUDFLARE_TUNNEL_TOKEN:-}"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - bb-network
+    restart: unless-stopped
+    profiles: ["tunnel"]
 
 # ------------------------------------------------------------------
 # Volumes

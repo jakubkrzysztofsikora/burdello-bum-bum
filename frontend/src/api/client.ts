@@ -57,13 +57,13 @@ export const api = {
   listSources: (
     params?: FilterParams,
   ): Promise<{ items: Source[]; total: number }> =>
-    fetchJson(`${API_BASE}/sources?${buildQuery(params)}`),
+    fetchJson(`${API_BASE}/sources/?${buildQuery(params)}`),
 
   // Transcripts
   listTranscripts: (
     params?: FilterParams,
   ): Promise<{ items: Transcript[]; total: number }> =>
-    fetchJson(`${API_BASE}/transcripts?${buildQuery(params)}`),
+    fetchJson(`${API_BASE}/transcripts/?${buildQuery(params)}`),
   getTranscript: (id: string): Promise<TranscriptDetail> =>
     fetchJson(`${API_BASE}/transcripts/${id}`),
 
@@ -71,7 +71,7 @@ export const api = {
   listProjects: (
     params?: FilterParams,
   ): Promise<{ items: Project[]; total: number }> =>
-    fetchJson(`${API_BASE}/projects?${buildQuery(params)}`),
+    fetchJson(`${API_BASE}/projects/?${buildQuery(params)}`),
   getProject: (
     id: string,
   ): Promise<Project & { tasks?: Task[]; transcripts?: Transcript[] }> =>
@@ -81,18 +81,19 @@ export const api = {
   listTasks: (
     params?: FilterParams,
   ): Promise<{ items: Task[]; total: number }> =>
-    fetchJson(`${API_BASE}/tasks?${buildQuery(params)}`),
+    fetchJson(`${API_BASE}/tasks/?${buildQuery(params)}`),
   updateTaskStatus: (id: string, status: string): Promise<Task> =>
-    fetchJson(`${API_BASE}/tasks/${id}/status`, {
-      method: "PUT",
-      body: JSON.stringify({ status }),
-    }),
+    // Backend expects `new_status` as a query string param, not a JSON body.
+    fetchJson(
+      `${API_BASE}/tasks/${id}/status?new_status=${encodeURIComponent(status)}`,
+      { method: "PUT" },
+    ),
 
   // Artifacts
   listArtifacts: (
     params?: FilterParams,
   ): Promise<{ items: Artifact[]; total: number }> =>
-    fetchJson(`${API_BASE}/artifacts?${buildQuery(params)}`),
+    fetchJson(`${API_BASE}/artifacts/?${buildQuery(params)}`),
   getArtifact: (id: string): Promise<Artifact> =>
     fetchJson(`${API_BASE}/artifacts/${id}`),
 

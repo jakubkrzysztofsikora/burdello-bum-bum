@@ -58,6 +58,7 @@ def _register_routers(app: FastAPI) -> None:
     from backend.api.routers.tasks import router as tasks_router
     from backend.api.routers.todoist import router as todoist_router
     from backend.api.routers.transcripts import router as transcripts_router
+    from backend.api.routers.mcp_api import router as mcp_api_router
 
     app.include_router(sources_router, prefix="/api/v1")
     app.include_router(transcripts_router, prefix="/api/v1")
@@ -70,6 +71,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(ingest_router, prefix="/api/v1")
     app.include_router(mining_router, prefix="/api/v1")
     app.include_router(todoist_router, prefix="/api/v1")
+    app.include_router(mcp_api_router, prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------

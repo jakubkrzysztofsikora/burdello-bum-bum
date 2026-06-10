@@ -194,6 +194,8 @@ class ProjectResponse(BaseModel):
     # Populated by the list/detail endpoints (aggregated from tasks).
     task_count: int = 0
     completed_task_count: int = 0
+    transcript_count: int = 0
+    last_activity_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "burdello-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "burdello-mcp.jakub.team", "custom_domain": true }
+  ],
+  "observability": { "enabled": true },
+  "vars": {
+    "BURDELLO_API_URL": "https://bb-api.jakub.team"
+  }
+}

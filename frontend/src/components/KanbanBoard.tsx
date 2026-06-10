@@ -9,8 +9,8 @@ interface KanbanBoardProps {
 const COLUMNS: { key: Task["status"]; label: string }[] = [
   { key: "todo", label: "Todo" },
   { key: "in_progress", label: "In Progress" },
-  { key: "completed", label: "Completed" },
-  { key: "abandoned", label: "Abandoned" },
+  { key: "done", label: "Done" },
+  { key: "cancelled", label: "Cancelled" },
 ];
 
 export function KanbanBoard({ tasks }: KanbanBoardProps) {

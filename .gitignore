@@ -38,6 +38,11 @@ htmlcov/
 # Claude Code local config
 .claude/
 
+# Cloudflare Worker build / deps / generated files
+worker/node_modules/
+worker/.wrangler/
+worker/worker-configuration.d.ts
+
 # >>> reasoning-core >>>
 .envrc.local
 .gemini/settings.json

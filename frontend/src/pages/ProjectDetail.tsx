@@ -23,8 +23,8 @@ export function ProjectDetail() {
   const statusCounts = {
     todo: tasks.filter((t) => t.status === "todo").length,
     in_progress: tasks.filter((t) => t.status === "in_progress").length,
-    completed: tasks.filter((t) => t.status === "completed").length,
-    abandoned: tasks.filter((t) => t.status === "abandoned").length,
+    done: tasks.filter((t) => t.status === "done").length,
+    cancelled: tasks.filter((t) => t.status === "cancelled").length,
   };
 
   const chartData = Object.entries(statusCounts)

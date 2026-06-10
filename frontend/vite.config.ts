@@ -11,6 +11,10 @@ export default defineConfig({
   server: {
     host: true,
     port: 3000,
+    allowedHosts: [
+      "localhost",
+      "mac-studio-jakub.tail5d39b4.ts.net",
+    ],
     proxy: {
       // Keep the browser's Host header (changeOrigin: false) so FastAPI's
       // trailing-slash 307 redirects resolve back to localhost:3000 instead

@@ -33,6 +33,8 @@ async def list_projects(
     db: AsyncSession = Depends(get_db),
     status: str | None = Query(None, description="Filter by status (active, archived, deleted)"),
     search: str | None = Query(None, description="Search in project name"),
+    sort: str = Query("last_activity_at", description="Sort field"),
+    order: str = Query("desc", description="Sort order (asc|desc)"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
 ) -> dict[str, Any]:
@@ -69,36 +71,56 @@ async def list_projects(
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
-    # Apply pagination
-    base_query = base_query.offset(skip).limit(limit).order_by(Project.created_at.desc())
-
-    result = await db.execute(base_query)
-    projects = list(result.scalars().all())
-
-    # Aggregate task counts for the page's projects in one query.
-    counts: dict[Any, tuple[int, int]] = {}
-    project_ids = [p.id for p in projects]
-    if project_ids:
-        rows = await db.execute(
-            select(
-                Task.project_id,
-                func.count(Task.id),
-                func.coalesce(
-                    func.sum(case((Task.status == "done", 1), else_=0)), 0
-                ),
-            )
-            .where(Task.project_id.in_(project_ids))
-            .group_by(Task.project_id)
+    # Aggregate per-project stats in one query so we can sort the page on
+    # them server-side without N+1 round trips.
+    stats_subq = (
+        select(
+            Task.project_id.label("pid"),
+            func.count(Task.id).label("task_count"),
+            func.coalesce(
+                func.sum(case((Task.status == "done", 1), else_=0)), 0
+            ).label("done_count"),
+            func.count(func.distinct(Task.source_transcript_id)).label("transcript_count"),
+            func.max(Task.created_at).label("last_activity_at"),
         )
-        for pid, total_c, done_c in rows.all():
-            counts[pid] = (int(total_c), int(done_c))
+        .group_by(Task.project_id)
+        .subquery()
+    )
+
+    base_query = (
+        base_query.outerjoin(stats_subq, stats_subq.c.pid == Project.id)
+        .add_columns(
+            func.coalesce(stats_subq.c.task_count, 0),
+            func.coalesce(stats_subq.c.done_count, 0),
+            func.coalesce(stats_subq.c.transcript_count, 0),
+            stats_subq.c.last_activity_at,
+        )
+    )
+
+    sort_map = {
+        "name": Project.name,
+        "task_count": func.coalesce(stats_subq.c.task_count, 0),
+        "last_activity_at": stats_subq.c.last_activity_at,
+        "created_at": Project.created_at,
+    }
+    sort_col = sort_map.get(sort, stats_subq.c.last_activity_at)
+    direction = sort_col.desc() if order.lower() == "desc" else sort_col.asc()
+    # Push NULL last_activity_at to the bottom regardless of direction so
+    # never-active projects don't dominate the first page.
+    base_query = base_query.order_by(
+        direction.nulls_last() if hasattr(direction, "nulls_last") else direction,
+        Project.created_at.desc(),
+    ).offset(skip).limit(limit)
+
+    rows = (await db.execute(base_query)).all()
 
     items = []
-    for p in projects:
-        resp = ProjectResponse.model_validate(p)
-        tc, dc = counts.get(p.id, (0, 0))
-        resp.task_count = tc
-        resp.completed_task_count = dc
+    for project, task_count, done_count, transcript_count, last_activity_at in rows:
+        resp = ProjectResponse.model_validate(project)
+        resp.task_count = int(task_count)
+        resp.completed_task_count = int(done_count)
+        resp.transcript_count = int(transcript_count)
+        resp.last_activity_at = last_activity_at
         items.append(resp)
 
     page = skip // limit + 1 if limit > 0 else 1
@@ -176,6 +198,25 @@ async def get_project(
         for a in (project.artifacts or [])
     ]
 
+    # Distinct transcripts that contributed to this project. Tasks +
+    # artifacts both carry source_transcript_id; union them via DISTINCT.
+    transcript_count = (
+        await db.execute(
+            select(func.count(func.distinct(Task.source_transcript_id))).where(
+                Task.project_id == project_uuid,
+                Task.source_transcript_id.isnot(None),
+            )
+        )
+    ).scalar_one() or 0
+
+    # Last activity = newest task created_at (artifacts are coincident
+    # with their tasks today).
+    last_activity_at = (
+        await db.execute(
+            select(func.max(Task.created_at)).where(Task.project_id == project_uuid)
+        )
+    ).scalar_one_or_none()
+
     return {
         "id": project.id,
         "name": project.name,
@@ -187,6 +228,11 @@ async def get_project(
         "tasks": task_summaries,
         "artifacts": artifact_summaries,
         "stats": stats,
+        # Flat fields the frontend ProjectDetail page reads directly.
+        "task_count": total_tasks,
+        "completed_task_count": tasks_done,
+        "transcript_count": transcript_count,
+        "last_activity_at": last_activity_at,
     }
 
 
