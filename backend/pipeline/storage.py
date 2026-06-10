@@ -10,7 +10,8 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.models import (
@@ -301,6 +302,9 @@ class PipelineStorage:
 
         # --- Projects (get-or-create by name) ---
         project_ids: dict[str, uuid.UUID] = {}
+        # Tracks rows this transcript created so the empty-project sweep
+        # at the end only nukes rows nobody else attached anything to.
+        newly_created_project_ids: set[uuid.UUID] = set()
         for proj_data in results.get("projects", []):
             name = (proj_data.get("name") or "").strip()
             if not name:
@@ -319,9 +323,24 @@ class PipelineStorage:
                 status=proj_data.get("status") or "active",
                 metadata_={"confidence": proj_data.get("confidence")},
             )
-            self.db.add(project)
-            await self.db.flush()
+            # SAVEPOINT-scoped insert: if a parallel mine_task wins the race
+            # on the UNIQUE(name) constraint, only THIS statement rolls back,
+            # not the outer transaction (which holds earlier work in this
+            # store_mining_results call).
+            try:
+                async with self.db.begin_nested():
+                    self.db.add(project)
+                    await self.db.flush()
+            except IntegrityError:
+                existing = (
+                    await self.db.execute(
+                        select(Project).where(Project.name == name)
+                    )
+                ).scalar_one()
+                project_ids[name] = existing.id  # type: ignore[assignment]
+                continue
             project_ids[name] = project.id  # type: ignore[assignment]
+            newly_created_project_ids.add(project.id)  # type: ignore[arg-type]
             counts["projects"] += 1
 
         primary_project_id = next(iter(project_ids.values()), None)
@@ -399,6 +418,25 @@ class PipelineStorage:
             counts["mining_results"] += 1
 
         await self.db.flush()
+
+        # Concurrency-safe empty-project sweep: only delete projects this
+        # transcript just created, and only when nobody — including a
+        # parallel mine_task — has attached a task or artifact to them.
+        # The NOT EXISTS guard prevents racing workers from cascading
+        # each other's tasks away.
+        if newly_created_project_ids:
+            dropped = await self.db.execute(
+                delete(Project).where(
+                    Project.id.in_(newly_created_project_ids),
+                    ~exists().where(Task.project_id == Project.id),
+                    ~exists().where(Artifact.project_id == Project.id),
+                )
+            )
+            n_dropped = dropped.rowcount or 0
+            if n_dropped:
+                counts["projects"] -= n_dropped
+                counts["projects_dropped_empty"] = n_dropped
+
         logger.info(
             "store_mining_results: %s -> %d projects, %d tasks, %d artifacts",
             transcript_id,

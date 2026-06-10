@@ -37,3 +37,10 @@ htmlcov/
 
 # Claude Code local config
 .claude/
+
+# >>> reasoning-core >>>
+.envrc.local
+.gemini/settings.json
+.vibe/config.toml
+.reasoning-core/
+# <<< reasoning-core <<<

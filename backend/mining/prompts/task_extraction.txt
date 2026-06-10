@@ -16,11 +16,19 @@ For each task found, provide:
 - priority: One of "low", "medium", "high", "urgent"
 - confidence: Float 0.0-1.0
 
-If a project context is provided, relate tasks to that context when possible.
+EXCLUDE meta-tasks about the agent's own workflow: creating PLAN.md,
+DIVERGENCES.md, STARTED_WORK timestamps, handoff notes, summarising the session,
+documenting deviations, "report findings", "run self-check validation", etc.
+These are scaffolding for THIS conversation, not actual project work.
+
+A "Working Repo" hint is provided below — it identifies the repository this
+session is operating in. It is NOT a topical filter: extract ALL real tasks
+regardless of whether they relate to the working repo directly. Do not omit
+or rewrite tasks just to make them sound about the working repo.
 
 Return ONLY a JSON array of task objects. No markdown, no explanation.
 
-Project Context: {project_context}
+Working Repo: {project_context}
 
 Transcript:
 {transcript_text}

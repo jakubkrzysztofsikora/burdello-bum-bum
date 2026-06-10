@@ -287,6 +287,42 @@ npm test
 | `BB_CHUNK_OVERLAP` | `50` | Chunk overlap |
 | `TODOIST_API_TOKEN` | `` | Todoist API token |
 
+## Maintenance
+
+### Project classification — re-bind to canonical names
+
+The mining pipeline previously generated 1,000+ noisy projects (libraries,
+Azure resources, PR branches). It now derives the canonical project from
+the source file path via `backend/pipeline/repo_resolver.py`.
+
+To re-apply the resolver against existing data (after editing collapse rules,
+the blocklist, or the humanizer overrides):
+
+```bash
+# Backup (lives inside the postgres container on a persistent volume)
+docker exec bb-postgres pg_dump -U bbuser -d burdello \
+    -t projects -t tasks -t artifacts -f /tmp/pre-canonicalize.sql
+
+# Preview (no writes)
+docker exec bb-backend python -m backend.scripts.canonicalize_projects --dry-run
+
+# Apply atomically
+docker exec bb-backend python -m backend.scripts.canonicalize_projects --apply
+```
+
+Expected order-of-magnitude result: ~3,700 source rows collapse to **~20–30
+canonical projects** (e.g. *Reasoning Core*, *Circit App*, *Jakub Health Hub*).
+Non-Claude transcripts (Gemini / Kimi / Codex) bucket into
+`Unsorted (<Provider>)` until per-provider resolvers are added.
+
+Tweak the rule set at:
+
+- `backend/pipeline/repo_resolver.py` — `_COLLAPSE_RULES`,
+  `_IGNORE_PREFIXES`, `_LIBRARY_BLOCKLIST`, `_HUMANIZED_OVERRIDES`,
+  `_KNOWN_ORGS`.
+- Curation hint: run `--dry-run` and read the *Top unmatched slugs* list at
+  the end of the log to find candidates for new rules / overrides.
+
 ## Tailscale Deployment
 
 Share your local instance over Tailscale:

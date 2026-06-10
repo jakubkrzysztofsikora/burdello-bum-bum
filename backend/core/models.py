@@ -312,6 +312,8 @@ class Project(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
+        unique=True,
+        index=True,
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(

@@ -206,10 +206,19 @@ def extract_task(self, source_path: str, provider: str | None = None) -> dict[st
             },
         }
 
+    # Deterministic project identity from path — overrides whatever the LLM
+    # will try to invent in mine_task. See backend/pipeline/repo_resolver.py.
+    from backend.pipeline.repo_resolver import resolve_from_path
+    identity = resolve_from_path(source_path)
+
     return {
         "source_path": source_path,
         "provider": provider,
         "extracted": extracted,
+        "repo_slug": identity.slug if identity else None,
+        "repo_humanized": identity.humanized if identity else None,
+        "repo_owner": identity.owner if identity else None,
+        "repo_provider": identity.provider if identity else None,
     }
 
 
@@ -516,11 +525,51 @@ def mine_task(self, embed_result: dict[str, Any]) -> dict[str, Any]:
 
             settings = get_settings()
             from backend.mining.engine import MiningEngine
+            from backend.pipeline.repo_resolver import resolve_from_path
+            from sqlalchemy import select
+            from backend.core.models import Source, Transcript
 
             engine = MiningEngine(
                 litellm_url=settings.LITELLM_URL,
             )
-            results = await engine.mine_transcript(transcript_id, text)
+
+            # Resolve the canonical project identity from the source path
+            # BEFORE mining so we can short-circuit the LLM extract_projects
+            # call (its output would be discarded anyway).
+            source_path_row = (
+                await db.execute(
+                    select(Source.metadata_["file_path"].as_string())
+                    .join(Transcript, Transcript.source_id == Source.id)
+                    .where(Transcript.id == transcript_id)
+                )
+            ).scalar_one_or_none()
+            identity = (
+                resolve_from_path(source_path_row) if source_path_row else None
+            )
+
+            results = await engine.mine_transcript(
+                transcript_id,
+                text,
+                project_context=identity.humanized if identity else None,
+            )
+
+            # Replace whatever projects field we have with the deterministic
+            # identity. The LLM keeps producing tasks/artifacts/status; only
+            # its project guesses are discarded.
+            if identity is not None:
+                results["projects"] = [{
+                    "name": identity.humanized,
+                    "description": (
+                        f"{identity.provider} transcripts for {identity.humanized}"
+                    ),
+                    "status": "active",
+                    "confidence": 1.0,
+                }]
+            else:
+                # Path didn't match a known provider; drop the LLM's guesses
+                # rather than persisting noise. Tasks/artifacts will attach
+                # with project_id=NULL.
+                results["projects"] = []
 
             # Persist the mining output (projects/tasks/artifacts/raw rows).
             counts = await storage.store_mining_results(transcript_id, results)
@@ -530,6 +579,8 @@ def mine_task(self, embed_result: dict[str, Any]) -> dict[str, Any]:
                 "transcript_id": transcript_id_str,
                 "stored": counts,
                 "status": "mined",
+                "repo_slug": identity.slug if identity else None,
+                "repo_humanized": identity.humanized if identity else None,
             }
 
     try:

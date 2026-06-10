@@ -96,6 +96,24 @@ async def get_detailed_stats(db: AsyncSession = Depends(get_db)) -> dict[str, An
     }
 
 
+@router.get("/resolver")
+async def get_resolver_stats() -> dict[str, Any]:
+    """Return repo-resolver counters and unmatched-slug curation hints.
+
+    Counters are process-local. With multiple worker processes the worker
+    that receives the HTTP request reports only its own counters — useful as
+    a smoke signal, not a precise total.
+    """
+    from backend.pipeline.repo_resolver import counters, unmatched_slugs
+
+    return {
+        "counters": counters(),
+        "unmatched_top": [
+            {"slug": s, "count": c} for s, c in unmatched_slugs(top_n=50)
+        ],
+    }
+
+
 @router.get("/trends")
 async def get_trends(
     db: AsyncSession = Depends(get_db),

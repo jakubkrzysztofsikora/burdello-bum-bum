@@ -45,7 +45,12 @@ class MiningEngine:
         """
         settings = get_settings()
         self.litellm_url = (litellm_url or settings.LITELLM_URL).rstrip("/")
-        self.model = model or os.environ.get("BB_MINING_MODEL", "gpt-4o-mini")
+        raw_model = model or os.environ.get("BB_MINING_MODEL", "gpt-4o-mini")
+        # LiteLLM needs an explicit provider prefix to route via the
+        # OpenAI-compatible api_base; bare model names like "kimi" trigger
+        # "LLM Provider NOT provided". Default to openai/ when the caller
+        # supplied no prefix.
+        self.model = raw_model if "/" in raw_model else f"openai/{raw_model}"
         self.api_key = settings.LITELLM_API_KEY or os.environ.get("LITELLM_API_KEY", "")
 
     async def extract_projects(self, transcript_text: str) -> list[dict[str, Any]]:
@@ -259,6 +264,7 @@ class MiningEngine:
         self,
         transcript_id: uuid.UUID,
         transcript_text: str,
+        project_context: str | None = None,
     ) -> dict[str, Any]:
         """Run all mining operations on a transcript.
 
@@ -275,9 +281,16 @@ class MiningEngine:
         """
         logger.info("mine_transcript: starting mining for %s", transcript_id)
 
-        projects = await self.extract_projects(transcript_text)
-        project_names = [p.get("name", "") for p in projects]
-        project_context = ", ".join(project_names) if project_names else None
+        # When the caller supplies a deterministic project_context (path-based
+        # repo resolver), skip the LLM extract_projects call entirely — its
+        # output is discarded by the new project-override path. Saves one LLM
+        # roundtrip per transcript.
+        if project_context is None:
+            projects = await self.extract_projects(transcript_text)
+            project_names = [p.get("name", "") for p in projects]
+            project_context = ", ".join(project_names) if project_names else None
+        else:
+            projects = []
 
         tasks = await self.extract_tasks(transcript_text, project_context)
         status = await self.infer_status(transcript_text)
