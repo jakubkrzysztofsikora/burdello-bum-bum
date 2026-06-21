@@ -46,6 +46,7 @@ class TestTableRegistry:
         "artifacts",
         "transcript_relationships",
         "mining_results",
+        "bookmarks",
     }
 
     async def test_all_tables_exist(self) -> None:
