@@ -253,6 +253,31 @@ def resolve_from_path(file_path: str) -> RepoIdentity | None:
     return None
 
 
+def resolve_from_cwd(cwd: str) -> RepoIdentity | None:
+    """Resolve a canonical repo identity from a bare working directory.
+
+    :func:`resolve_from_path` only understands provider transcript paths
+    (``.../.claude/projects/-<encoded>/...``). An MCP caller often has only the
+    agent's plain ``cwd`` (e.g. ``/Users/x/Repos/personal/burdello-bum-bum``,
+    possibly a subdirectory of the repo). This synthesises the Claude-encoded
+    form of that cwd and resolves it, so a bookmark created with only a cwd
+    lands on the SAME canonical project that mining would assign a session
+    launched from that directory.
+
+    Args:
+        cwd: Absolute working directory (POSIX form).
+
+    Returns:
+        A :class:`RepoIdentity`, or None if the cwd does not map to a project
+        (e.g. not under ``~/Repos``, or a blocked/ignored slug).
+    """
+    if not cwd:
+        return None
+    # cwd is absolute, so it starts with "/" → the leading "-" is implicit.
+    encoded = cwd.replace("/", "-")
+    return resolve_from_path(f"/.claude/projects/{encoded}/_cwd_.jsonl")
+
+
 def counters() -> dict[str, int]:
     """Return a snapshot of process-local counters."""
     return dict(_COUNTERS)

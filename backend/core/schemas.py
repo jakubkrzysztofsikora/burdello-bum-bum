@@ -100,6 +100,7 @@ class TranscriptCreate(BaseModel):
     """Request body for creating a new transcript."""
 
     source_id: uuid.UUID
+    session_id: str | None = None
     title: str | None = Field(default=None, max_length=500)
     raw_text: str | None = None
     language: str | None = Field(default=None, max_length=10)
@@ -113,6 +114,7 @@ class TranscriptResponse(BaseModel):
 
     id: uuid.UUID
     source_id: uuid.UUID
+    session_id: str | None = None
     title: str | None
     language: str | None
     status: str
@@ -135,6 +137,7 @@ class TranscriptSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    session_id: str | None = None
     title: str | None
     status: str
     message_count: int | None = None
@@ -176,6 +179,9 @@ class ProjectCreate(BaseModel):
 
     name: str = Field(..., max_length=255)
     description: str | None = None
+    notes: str | None = None
+    tags: list[str] | None = Field(default_factory=list)
+    pinned: bool | None = False
     metadata: dict[str, Any] | None = Field(default_factory=dict)
 
 
@@ -188,6 +194,9 @@ class ProjectResponse(BaseModel):
     name: str
     description: str | None
     status: str
+    notes: str | None
+    tags: list[str] | None
+    pinned: bool
     metadata: dict[str, Any] | None = Field(
         default=None, validation_alias=AliasChoices("metadata_", "metadata")
     )
@@ -248,6 +257,9 @@ class TaskCreate(BaseModel):
     priority: str | None = "medium"
     due_date: datetime | None = None
     source_transcript_id: uuid.UUID | None = None
+    notes: str | None = None
+    tags: list[str] | None = Field(default_factory=list)
+    pinned: bool | None = False
     metadata: dict[str, Any] | None = Field(default_factory=dict)
 
 
@@ -264,6 +276,9 @@ class TaskResponse(BaseModel):
     priority: str | None
     due_date: datetime | None
     source_transcript_id: uuid.UUID | None
+    notes: str | None
+    tags: list[str] | None
+    pinned: bool
     metadata: dict[str, Any] | None = Field(
         default=None, validation_alias=AliasChoices("metadata_", "metadata")
     )
@@ -303,6 +318,20 @@ class TaskListResponse(BaseModel):
 # ===========================================================================
 
 
+class ArtifactCreate(BaseModel):
+    """Request body for creating an artifact."""
+
+    project_id: uuid.UUID | None = None
+    artifact_type: str = Field(..., max_length=50)
+    name: str = Field(..., max_length=255)
+    content: dict[str, Any] | None = Field(default_factory=dict)
+    source_transcript_id: uuid.UUID | None = None
+    notes: str | None = None
+    tags: list[str] | None = Field(default_factory=list)
+    pinned: bool | None = False
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
+
+
 class ArtifactResponse(BaseModel):
     """Response model for an artifact."""
 
@@ -314,6 +343,9 @@ class ArtifactResponse(BaseModel):
     name: str
     content: dict[str, Any]
     source_transcript_id: uuid.UUID | None
+    notes: str | None
+    tags: list[str] | None
+    pinned: bool
     metadata: dict[str, Any] | None = Field(
         default=None, validation_alias=AliasChoices("metadata_", "metadata")
     )
@@ -338,6 +370,69 @@ class ArtifactListResponse(BaseModel):
     page: int
     page_size: int
     items: list[ArtifactResponse]
+
+
+# ===========================================================================
+# Bookmark Schemas
+# ===========================================================================
+
+
+class BookmarkCreate(BaseModel):
+    """Request body for creating a bookmark."""
+
+    note_text: str = Field(..., min_length=1, max_length=4000)
+    project_id: uuid.UUID | None = None
+    project_name: str | None = Field(default=None, max_length=255)
+    session_id: str | None = Field(default=None, max_length=255)
+    session_path: str | None = Field(default=None, max_length=1000)
+    author: str | None = Field(default=None, max_length=100)
+    tags: list[str] | None = Field(default_factory=list)
+    pinned: bool | None = False
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
+
+
+class BookmarkUpdate(BaseModel):
+    """Request body for patching a bookmark (all fields optional).
+
+    Distinct from ``BookmarkCreate`` so a partial update (e.g. toggling
+    ``pinned``) does not require resending ``note_text``. ``note_text`` is
+    constrained to a non-empty string when present so a PATCH can never blank
+    out the NOT NULL note column.
+    """
+
+    note_text: str | None = Field(default=None, min_length=1, max_length=4000)
+    pinned: bool | None = None
+    tags: list[str] | None = None
+
+
+class BookmarkResponse(BaseModel):
+    """Response model for a bookmark."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID | None
+    transcript_id: uuid.UUID | None
+    session_id: str | None
+    session_path: str | None
+    note_text: str
+    author: str | None
+    ingest_status: str
+    ingest_job_id: str | None
+    tags: list[str] | None
+    pinned: bool
+    metadata: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasChoices("metadata_", "metadata")
+    )
+    created_at: datetime
+    updated_at: datetime
+
+
+class BookmarkListResponse(BaseModel):
+    """List of bookmarks ({total, items} envelope)."""
+
+    total: int
+    items: list[BookmarkResponse]
 
 
 # ===========================================================================

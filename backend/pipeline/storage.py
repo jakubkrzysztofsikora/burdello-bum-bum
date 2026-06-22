@@ -105,6 +105,8 @@ class PipelineStorage:
 
         transcript = Transcript(
             source_id=source_id,
+            session_id=transcript_create.session_id
+            or (transcript_create.metadata or {}).get("session_id"),
             title=transcript_create.title,
             raw_text=transcript_create.raw_text,
             language=transcript_create.language,

@@ -49,3 +49,24 @@ worker/worker-configuration.d.ts
 .vibe/config.toml
 .reasoning-core/
 # <<< reasoning-core <<<
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
+
+# Local caches / backups / agent scratch — never commit (backups/ is ~15GB)
+backups/
+.hf-cache/
+.copilot/
+.gemini/
+.vibe/
+.pokayokay/
+.envrc
+.envrc.local
+
+# One-off scratch scripts (not part of the app)
+check_columns.py
+test_api.py
+PLAN.md

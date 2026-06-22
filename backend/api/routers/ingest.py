@@ -7,6 +7,7 @@ and check ingestion queue status.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import tempfile
 import uuid
@@ -14,8 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from kombu.exceptions import OperationalError
 
-from backend.pipeline.discovery import SourceDiscovery
+from backend.pipeline.discovery import DEFAULT_PROVIDER_PATTERNS, SourceDiscovery
 from backend.pipeline.tasks import process_source
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,58 @@ router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 # In-memory status tracker (replace with Redis in production)
 _ingest_status: dict[str, Any] = {}
+
+# Session ids are filename stems; restrict to safe chars before globbing so a
+# crafted value can't expand wildcards or traverse directories.
+_SESSION_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,255}")
+
+
+def _find_session_file(session_id: str | None) -> str | None:
+    """Locate a provider session file by its session UUID.
+
+    Session files are named ``<session_id>.jsonl``. The Claude Code layout
+    (``~/.claude/projects/**/<session_id>.jsonl``) is by far the most common, so
+    it is probed first; other providers from ``DEFAULT_PROVIDER_PATTERNS`` are a
+    fallback. On collision (the same id under multiple dirs) the
+    most-recently-modified file wins — that is the live session being appended
+    to — so selection is deterministic across runs/hosts.
+
+    Args:
+        session_id: Agent session UUID (the file stem), or ``None``.
+
+    Returns:
+        Absolute path of the newest matching file, or ``None``.
+    """
+    if not session_id:
+        return None
+
+    # Validate the id before globbing: a value containing ``*``/``..``/``/``
+    # would otherwise be glob-expanded and could walk the filesystem.
+    if not _SESSION_ID_RE.fullmatch(session_id):
+        return None
+
+    home = Path.home()
+    candidates: list[Path] = []
+
+    # Most common: Claude Code sessions.
+    candidates.extend(home.glob(f".claude/projects/**/{session_id}.jsonl"))
+
+    # Fallback: other providers. session_id is the filename stem, so swap the
+    # trailing ``*`` of each provider glob for ``<session_id>``.
+    for pattern in DEFAULT_PROVIDER_PATTERNS.values():
+        if pattern.endswith("*.jsonl"):
+            candidate = pattern[: -len("*.jsonl")] + f"{session_id}.jsonl"
+        elif pattern.endswith("*.json"):
+            candidate = pattern[: -len("*.json")] + f"{session_id}.json"
+        else:
+            continue
+        candidates.extend(home.glob(candidate))
+
+    files = [p for p in candidates if p.is_file()]
+    if not files:
+        return None
+    # Newest by mtime wins — deterministic and prefers the live/grown file.
+    return str(max(files, key=lambda p: p.stat().st_mtime))
 
 
 @router.post("/")
@@ -58,6 +112,51 @@ async def trigger_ingest() -> dict[str, Any]:
         "discovered": len(sources),
         "sources": [s["path"] for s in sources],
     }
+
+
+@router.post("/session")
+async def ingest_session(
+    path: str | None = Query(None, description="Absolute path to a session file"),
+    session_id: str | None = Query(None, description="Session UUID to locate"),
+) -> dict[str, Any]:
+    """Trigger focused ingest of a single agent session file.
+
+    Accepts either an explicit ``path`` (preferred) or a ``session_id`` to look
+    up. Dispatches the single-file pipeline to Celery.
+
+    Returns:
+        Dict with the Celery job id, resolved session path, and status.
+
+    Raises:
+        HTTPException: 422 if neither arg given, 404 if no file found,
+            503 if the Celery broker is unavailable.
+    """
+    if not path and not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="path or session_id required",
+        )
+
+    target = path or _find_session_file(session_id)
+    if not target or not Path(target).is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="session file not found",
+        )
+
+    try:
+        result = process_source.delay(target)
+    except OperationalError as exc:
+        # Log the broker detail; don't leak connection strings to the client.
+        logger.error("Ingest session: broker unavailable: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ingest queue unavailable",
+        )
+
+    logger.info("Ingest session: queued %s (job=%s)", target, result.id)
+
+    return {"job_id": result.id, "session_path": target, "status": "queued"}
 
 
 @router.post("/upload")

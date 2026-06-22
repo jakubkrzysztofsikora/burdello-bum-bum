@@ -20,14 +20,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.mcp_tools import (
+    create_bookmark,
     get_kanban_board,
     get_stats,
     list_artifacts,
+    list_bookmarks,
     list_projects,
     list_tasks,
     search_transcripts,
     update_task_status,
 )
+
+_MAX_NOTE_LEN = 4000
 
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
@@ -150,3 +154,46 @@ async def call_get_stats(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     return await get_stats(db)
+
+
+@router.post("/create_bookmark", dependencies=[Depends(_require_bearer)])
+async def call_create_bookmark(
+    body: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    note_text = body.get("note_text")
+    if not note_text or not str(note_text).strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="note_text is required",
+        )
+    if len(note_text) > _MAX_NOTE_LEN:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"note_text exceeds {_MAX_NOTE_LEN} characters",
+        )
+    return await create_bookmark(
+        db,
+        note_text=note_text,
+        session_id=body.get("session_id"),
+        session_path=body.get("session_path"),
+        cwd=body.get("cwd"),
+        project_name=body.get("project_name"),
+        project_id=body.get("project_id"),
+        author=body.get("author", "claude-code"),
+        tags=body.get("tags"),
+    )
+
+
+@router.post("/list_bookmarks", dependencies=[Depends(_require_bearer)])
+async def call_list_bookmarks(
+    body: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    return await list_bookmarks(
+        db,
+        project_name=body.get("project_name"),
+        project_id=body.get("project_id"),
+        cwd=body.get("cwd"),
+        limit=int(body.get("limit", 50)),
+    )

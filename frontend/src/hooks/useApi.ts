@@ -8,6 +8,7 @@ import type {
   Project,
   Task,
   Artifact,
+  Bookmark,
   SearchResponse,
   SkillInfo,
   MiningResult,
@@ -98,6 +99,15 @@ export function useUpdateTaskStatus() {
       qc.invalidateQueries({ queryKey: ["tasks"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
     },
+  });
+}
+
+// Bookmarks
+export function useBookmarks(params?: FilterParams) {
+  return useQuery<{ items: Bookmark[]; total: number }, Error>({
+    queryKey: ["bookmarks", params],
+    queryFn: () => api.listBookmarks(params),
+    staleTime: STALE_TIME,
   });
 }
 

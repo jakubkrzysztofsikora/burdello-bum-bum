@@ -18,9 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from celery import chain, shared_task
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import get_settings
 from backend.core.database import AsyncSessionLocal
+from backend.core.models import Transcript
 from backend.pipeline.chunking import SemanticChunker
 from backend.pipeline.discovery import SourceDiscovery
 from backend.pipeline.embedding import EmbeddingEngine
@@ -93,6 +96,45 @@ def _get_search_engine() -> HybridSearchEngine:
             collection_name=settings.QDRANT_COLLECTION,
         )
     return _search_engine
+
+
+async def _link_session_bookmarks(db: AsyncSession, transcript_id: uuid.UUID) -> None:
+    """Best-effort: link any bookmarks for this transcript's session.
+
+    Called at the ``completed`` transition (after chunks/embeddings are stored
+    and the transcript is searchable) rather than at mine-tail, so bookmark
+    linking does not depend on the failure-prone LLM mining stage (plan R3 /
+    architect #1).
+
+    Isolated in a SAVEPOINT so a linker failure rolls back ONLY the link UPDATE
+    and never poisons the caller's outer transaction — the surrounding
+    ``await db.commit()`` of chunks/status stays valid (architect #2). Fully
+    non-fatal: any error is logged and swallowed.
+    """
+    from backend.pipeline.bookmark_linker import link_bookmarks_for_session
+
+    try:
+        session_id = (
+            await db.execute(
+                select(Transcript.session_id).where(Transcript.id == transcript_id)
+            )
+        ).scalar_one_or_none()
+        if not session_id:
+            return
+        async with db.begin_nested():  # SAVEPOINT — isolates linker failure
+            linked = await link_bookmarks_for_session(db, session_id)
+        if linked:
+            logger.info(
+                "linked %d bookmark(s) to transcript %s (session %s)",
+                linked,
+                transcript_id,
+                session_id,
+            )
+    except Exception:
+        logger.exception(
+            "bookmark linking failed for transcript %s (non-fatal)",
+            transcript_id,
+        )
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30)
@@ -414,6 +456,9 @@ def embed_task(self, chunk_result: dict[str, Any]) -> dict[str, Any]:
             # Update transcript status
             await storage.update_transcript_status(transcript_id, "completed")
 
+            # Transcript is now stored + searchable — link any pending bookmarks.
+            await _link_session_bookmarks(db, transcript_id)
+
             # Storage only flushes; commit so chunks + status survive.
             await db.commit()
 
@@ -472,12 +517,14 @@ def chunk_embed_task(self, payload: dict[str, Any]) -> dict[str, Any]:
             )
             if not chunks:
                 await storage.update_transcript_status(transcript_id, "completed")
+                await _link_session_bookmarks(db, transcript_id)
                 await db.commit()
                 return {"transcript_id": transcript_id_str, "status": "no_chunks"}
 
             embedded_chunks = _get_embedding_engine().embed_chunks(chunks)
             chunk_ids = await storage.store_chunks(transcript_id, embedded_chunks)
             await storage.update_transcript_status(transcript_id, "completed")
+            await _link_session_bookmarks(db, transcript_id)
             await db.commit()
 
             return {
@@ -573,6 +620,12 @@ def mine_task(self, embed_result: dict[str, Any]) -> dict[str, Any]:
 
             # Persist the mining output (projects/tasks/artifacts/raw rows).
             counts = await storage.store_mining_results(transcript_id, results)
+
+            # Idempotent safety-net re-link (primary linking happens at the
+            # `completed` transition in embed/chunk_embed). Savepoint-isolated
+            # and fully non-fatal — see _link_session_bookmarks.
+            await _link_session_bookmarks(db, transcript_id)
+
             await db.commit()
 
             return {

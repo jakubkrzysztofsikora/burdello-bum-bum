@@ -13,14 +13,18 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    ARRAY,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -138,6 +142,12 @@ class Transcript(Base, TimestampMixin):
     source_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("sources.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+        comment="Agent session UUID (e.g. CLAUDE_CODE_SESSION_ID); link key for bookmarks",
     )
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     raw_text: Mapped[str | None] = mapped_column(
@@ -322,6 +332,17 @@ class Project(Base, TimestampMixin):
         default="active",
         comment="active, archived, deleted",
     )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String),
+        nullable=True,
+        server_default="{}",
+    )
+    pinned: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+    )
     metadata_: Mapped[dict | None] = mapped_column(
         "metadata",
         JSONB,
@@ -337,6 +358,12 @@ class Project(Base, TimestampMixin):
     artifacts: Mapped[list["Artifact"]] = relationship(
         back_populates="project",
         cascade="all, delete-orphan",
+    )
+    # No cascade: the DB FK is ON DELETE SET NULL, so deleting a project
+    # orphans its bookmarks rather than deleting them. Adding
+    # cascade="all, delete-orphan" here would contradict that.
+    bookmarks: Mapped[list["Bookmark"]] = relationship(
+        back_populates="project",
     )
 
     def __repr__(self) -> str:
@@ -385,6 +412,17 @@ class Task(Base, TimestampMixin):
     source_transcript_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("transcripts.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String),
+        nullable=True,
+        server_default="{}",
+    )
+    pinned: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
     )
     metadata_: Mapped[dict | None] = mapped_column(
         "metadata",
@@ -437,6 +475,17 @@ class Artifact(Base, TimestampMixin):
     source_transcript_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("transcripts.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String),
+        nullable=True,
+        server_default="{}",
+    )
+    pinned: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
     )
     metadata_: Mapped[dict | None] = mapped_column(
         "metadata",
@@ -566,4 +615,87 @@ class MiningResult(Base, TimestampMixin):
             f"<MiningResult(id={self.id!s}, "
             f"transcript_id={self.transcript_id!s}, "
             f"miner_type={self.miner_type!r})>"
+        )
+
+
+class Bookmark(Base, TimestampMixin):
+    """An agent-authored mark on a session — something to revisit later."""
+
+    __tablename__ = "bookmarks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    transcript_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("transcripts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+        comment="Agent session UUID; correlation key to Transcript.session_id",
+    )
+    session_path: Mapped[str | None] = mapped_column(
+        String(1000),
+        nullable=True,
+        comment="Display + focused-ingest hint only; not used as a join key",
+    )
+    note_text: Mapped[str] = mapped_column(Text, nullable=False)
+    author: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ingest_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default="none",
+        comment="none, pending, linked, failed",
+    )
+    ingest_job_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Celery result id for the focused-ingest job (observability)",
+    )
+    tags: Mapped[list[str] | None] = mapped_column(
+        ARRAY(String),
+        nullable=True,
+    )
+    pinned: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+    )
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+    )
+
+    # Relationships
+    project: Mapped["Project"] = relationship(back_populates="bookmarks")
+    transcript: Mapped["Transcript"] = relationship()
+
+    __table_args__ = (
+        # Composite index for the default list ordering (project, pinned, recency).
+        Index("ix_bookmarks_list", "project_id", "pinned", "created_at"),
+        # Partial index used by the session_id-keyed linker to find unlinked rows.
+        Index(
+            "ix_bookmarks_unlinked",
+            "session_id",
+            postgresql_where=text("transcript_id IS NULL"),
+        ),
+    )
+
+    def __repr__(self) -> str:
+        note_preview = self.note_text[:50] if self.note_text else ""
+        return (
+            f"<Bookmark(id={self.id!s}, "
+            f"project_id={self.project_id!s}, "
+            f"session_id={self.session_id!r}, "
+            f"note={note_preview!r}...)>"
         )

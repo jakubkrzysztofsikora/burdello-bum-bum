@@ -155,7 +155,9 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
             speaker = self._extract_speaker(record)
             timestamp = self._extract_timestamp(record)
             model = record.get("model") or record.get("model_name")
-            session_id = record.get("session_id")
+            # Real Claude Code JSONL uses camelCase ``sessionId``; older/other
+            # exports use snake_case ``session_id``. Accept both.
+            session_id = record.get("session_id") or record.get("sessionId")
             if model:
                 current_model = model
             if session_id:
@@ -178,7 +180,7 @@ class ClaudeCodeSkill(TranscriptSkill, JSONLSkillMixin):
                 model=current_model,
                 metadata={k: v for k, v in record.items() if k not in {
                     "type", "role", "content", "timestamp", "created_at",
-                    "model", "model_name", "session_id",
+                    "model", "model_name", "session_id", "sessionId",
                 }},
             )
             result.messages.append(norm_msg)

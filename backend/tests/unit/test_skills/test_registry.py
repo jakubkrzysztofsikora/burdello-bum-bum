@@ -72,7 +72,7 @@ class TestRegistration:
             empty_registry.register(str)  # type: ignore[arg-type]
 
     def test_list_skills(self, full_registry: SkillRegistry) -> None:
-        ""``list_skills`` returns metadata for every registered skill."""
+        """`list_skills` returns metadata for every registered skill."""
         metas = full_registry.list_skills()
         names = {m.name for m in metas}
         assert "claude_code" in names

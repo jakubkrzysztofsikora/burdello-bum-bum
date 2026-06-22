@@ -14,15 +14,22 @@ thin re-shape for tool calls.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from kombu.exceptions import OperationalError
 from sqlalchemy import case, desc, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.models import Artifact, Project, Task, Transcript
+from backend.core.models import Artifact, Bookmark, Project, Task, Transcript
+from backend.pipeline.bookmark_linker import link_bookmarks_for_session
+from backend.pipeline.repo_resolver import resolve_from_cwd, resolve_from_path
+from backend.pipeline.tasks import process_source
 
 
 _KANBAN_COLUMNS: tuple[str, ...] = ("todo", "in_progress", "done", "cancelled")
+_MAX_NOTE_LEN: int = 4000
 _KANBAN_LABELS: dict[str, str] = {
     "todo": "Todo",
     "in_progress": "In Progress",
@@ -182,6 +189,9 @@ async def list_projects(
             {
                 "id": str(p.id),
                 "name": p.name,
+                "notes": p.notes,
+                "tags": p.tags or [],
+                "pinned": p.pinned,
                 "task_count": int(tc),
                 "completed_task_count": int(dc),
             }
@@ -243,6 +253,9 @@ async def list_artifacts(
                 "artifact_type": a.artifact_type,
                 "project_id": str(a.project_id) if a.project_id else None,
                 "preview": ((a.content or {}).get("content_preview") or "")[:500],
+                "notes": a.notes,
+                "tags": a.tags or [],
+                "pinned": a.pinned,
             }
             for a in rows
         ],
@@ -305,8 +318,216 @@ async def get_stats(db: AsyncSession) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Bookmarks
+# ---------------------------------------------------------------------------
+
+
+async def create_bookmark(
+    db: AsyncSession,
+    *,
+    note_text: str,
+    session_id: str | None = None,
+    session_path: str | None = None,
+    cwd: str | None = None,
+    project_name: str | None = None,
+    project_id: str | None = None,
+    author: str = "claude-code",
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Persist a bookmark, deriving its project from the session path.
+
+    Project resolution (R1): when a ``session_path`` or ``cwd`` is supplied, the
+    project is *derived* from it via the canonical path resolver (the same one
+    mining uses) and get-or-created by the humanized name. Otherwise it falls
+    back to an explicit ``project_id``/``project_name`` for non-Claude-Code
+    callers. Transcript linking keys on ``session_id`` (R2); a best-effort
+    immediate link handles already-ingested sessions, and an unlinked bookmark
+    with a real session file triggers a focused ingest (R3) — broker outages are
+    swallowed so the bookmark is never lost.
+    """
+    if not note_text or not note_text.strip():
+        return {"error": "note_text is required and must not be empty"}
+    if len(note_text) > _MAX_NOTE_LEN:
+        return {"error": f"note_text exceeds {_MAX_NOTE_LEN} characters"}
+
+    # Derive the canonical project from the session path (preferred) or the bare
+    # cwd, using the SAME resolver mining uses — so the bookmark lands on the
+    # project this session will be classified as. session_path is an encoded
+    # transcript path → resolve_from_path; cwd is a plain dir → resolve_from_cwd.
+    identity = None
+    if session_path:
+        identity = resolve_from_path(session_path)
+    if identity is None and cwd:
+        identity = resolve_from_cwd(cwd)
+    if identity is not None:
+        project = await _get_or_create_project(db, identity.humanized)
+    else:
+        project = await _resolve_project(
+            db, project_id=project_id, project_name=project_name
+        )
+    if project is None:
+        return {
+            "error": "could not resolve project (no path and unknown project_name)"
+        }
+
+    bm = Bookmark(
+        project_id=project.id,
+        session_id=session_id,
+        session_path=session_path,
+        note_text=note_text,
+        author=author,
+        tags=tags,
+        ingest_status="none",
+    )
+    db.add(bm)
+    await db.flush()
+
+    linked = await link_bookmarks_for_session(db, session_id) if session_id else 0
+
+    triggered = False
+    if not linked and session_path and Path(session_path).is_file():
+        try:
+            job = process_source.delay(session_path)
+            bm.ingest_job_id = job.id
+            bm.ingest_status = "pending"
+            triggered = True
+        except OperationalError:
+            # Broker down; the bookmark is already persisted — surface the
+            # failure on the row instead of raising.
+            bm.ingest_status = "failed"
+
+    # Persist any post-insert status/job-id changes, then refresh so the row
+    # reflects DB state: server defaults, ``created_at``, and the bulk linker's
+    # UPDATE (which set ``transcript_id``/``ingest_status`` out of session).
+    await db.flush()
+    await db.refresh(bm)
+    return {"bookmark": _bookmark_summary(bm), "ingest_triggered": triggered}
+
+
+async def list_bookmarks(
+    db: AsyncSession,
+    *,
+    project_name: str | None = None,
+    project_id: str | None = None,
+    cwd: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List a project's bookmarks, pinned + newest first. Pure read (no linker).
+
+    Resolves the project from ``project_id``/``project_name`` first, then falls
+    back to deriving it from ``cwd`` via the path resolver so a Claude Code
+    session defaults to its current repo.
+    """
+    project = await _resolve_project(
+        db, project_id=project_id, project_name=project_name
+    )
+    if project is None and cwd:
+        # Bare cwd → canonical identity via the same resolver mining uses.
+        identity = resolve_from_cwd(cwd)
+        if identity is not None:
+            project = await _resolve_project(
+                db, project_name=identity.humanized
+            )
+    if project is None:
+        return {
+            "project": None,
+            "items": [],
+            "error": "could not resolve project (unknown project_name and no cwd match)",
+        }
+
+    rows = (
+        await db.execute(
+            select(Bookmark)
+            .where(Bookmark.project_id == project.id)
+            .order_by(desc(Bookmark.pinned), desc(Bookmark.created_at))
+            .limit(limit)
+        )
+    ).scalars().all()
+    return {
+        "project": {"id": str(project.id), "name": project.name},
+        "items": [_bookmark_summary(b) for b in rows],
+        "count": len(rows),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _resolve_project(
+    db: AsyncSession,
+    *,
+    project_id: str | None = None,
+    project_name: str | None = None,
+) -> Project | None:
+    """Resolve a project by id, else by case-insensitive exact name.
+
+    Mirrors the inline pattern the other MCP tools use. Returns ``None`` when
+    neither lookup matches or both inputs are falsy.
+    """
+    if project_id:
+        return (
+            await db.execute(select(Project).where(Project.id == project_id))
+        ).scalar_one_or_none()
+    if project_name:
+        return (
+            await db.execute(
+                select(Project).where(
+                    func.lower(Project.name) == project_name.lower()
+                )
+            )
+        ).scalar_one_or_none()
+    return None
+
+
+async def _get_or_create_project(db: AsyncSession, name: str) -> Project:
+    """Get a project by case-insensitive name, creating it if absent.
+
+    Matches the get-or-create idiom in ``storage.py`` (de-dup by name); flushes
+    so the caller has the id. The caller owns the transaction (no commit here).
+    """
+    existing = (
+        await db.execute(
+            select(Project).where(func.lower(Project.name) == name.lower())
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    project = Project(name=name)
+    db.add(project)
+    try:
+        # Isolate in a SAVEPOINT: if a concurrent caller inserted the same name
+        # first, Project.name's unique constraint trips here without poisoning
+        # the outer transaction. Re-select the winner instead of losing the row.
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        project = (
+            await db.execute(
+                select(Project).where(func.lower(Project.name) == name.lower())
+            )
+        ).scalar_one()
+    return project
+
+
+def _bookmark_summary(bm: Bookmark) -> dict[str, Any]:
+    return {
+        "id": str(bm.id),
+        "project_id": str(bm.project_id) if bm.project_id else None,
+        "transcript_id": str(bm.transcript_id) if bm.transcript_id else None,
+        "session_id": bm.session_id,
+        "session_path": bm.session_path,
+        "note_text": bm.note_text,
+        "author": bm.author,
+        "ingest_status": bm.ingest_status,
+        "ingest_job_id": bm.ingest_job_id,
+        "tags": bm.tags or [],
+        "pinned": bm.pinned,
+        "created_at": bm.created_at.isoformat() if bm.created_at else None,
+        "updated_at": bm.updated_at.isoformat() if bm.updated_at else None,
+        "metadata": bm.metadata_ or {},
+    }
 
 
 def _task_summary(t: Task) -> dict[str, Any]:
@@ -316,5 +537,8 @@ def _task_summary(t: Task) -> dict[str, Any]:
         "status": t.status,
         "priority": t.priority,
         "description": (t.description or "")[:400],
+        "notes": t.notes,
+        "tags": t.tags or [],
+        "pinned": t.pinned,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }
