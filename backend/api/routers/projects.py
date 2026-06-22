@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from backend.core.database import get_db
 from backend.core.models import Artifact, Project, Task, Transcript
 from backend.core.schemas import (
+    ProjectCreate,
     ProjectDetailResponse,
     ProjectListResponse,
     ProjectResponse,
@@ -222,6 +223,9 @@ async def get_project(
         "name": project.name,
         "description": project.description,
         "status": project.status,
+        "notes": project.notes,
+        "tags": project.tags,
+        "pinned": project.pinned,
         "metadata": project.metadata_,
         "created_at": project.created_at,
         "updated_at": project.updated_at,
@@ -282,6 +286,83 @@ async def update_project_status(
     await db.commit()
     await db.refresh(project)
 
+    return project
+
+
+@router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+async def create_project(
+    data: ProjectCreate,
+    db: AsyncSession = Depends(get_db),
+) -> Project:
+    """Create a new project.
+
+    Args:
+        data: Project creation payload.
+        db: Async database session.
+
+    Returns:
+        Created project.
+    """
+    project = Project(
+        name=data.name,
+        description=data.description,
+        notes=data.notes,
+        tags=data.tags,
+        pinned=data.pinned,
+        metadata_=data.metadata,
+    )
+    db.add(project)
+    await db.commit()
+    await db.refresh(project)
+    return project
+
+
+@router.put("/{project_id}", response_model=ProjectResponse)
+async def update_project(
+    project_id: str,
+    data: ProjectCreate,
+    db: AsyncSession = Depends(get_db),
+) -> Project:
+    """Update an existing project.
+
+    Args:
+        project_id: UUID of the project.
+        data: Project update payload.
+        db: Async database session.
+
+    Returns:
+        Updated project.
+
+    Raises:
+        HTTPException: 404 if not found, 422 if invalid UUID.
+    """
+    try:
+        project_uuid = uuid.UUID(project_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid UUID format: {project_id}",
+        )
+
+    result = await db.execute(select(Project).where(Project.id == project_uuid))
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project with ID {project_id} not found",
+        )
+
+    project.name = data.name
+    project.description = data.description
+    project.notes = data.notes
+    project.tags = data.tags
+    project.pinned = data.pinned
+    if data.metadata is not None:
+        project.metadata_ = data.metadata
+
+    await db.commit()
+    await db.refresh(project)
     return project
 
 

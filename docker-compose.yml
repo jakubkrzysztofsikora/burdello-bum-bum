@@ -91,7 +91,7 @@ services:
     # shebang (kept correct by the Dockerfile, but this is rebuild-independent).
     command: ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
-      - "8000:8000"
+      - "8001:8000"
     # Live source mount: picks up backend code changes without an image rebuild
     # (the image's editable install resolves backend.* from /app/backend).
     volumes:

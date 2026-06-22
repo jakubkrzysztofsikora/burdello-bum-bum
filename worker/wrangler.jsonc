@@ -9,6 +9,6 @@
   ],
   "observability": { "enabled": true },
   "vars": {
-    "BURDELLO_API_URL": "https://bb-api.jakub.team"
+    "BURDELLO_API_URL": "https://mac-studio-jakub.tail5d39b4.ts.net"
   }
 }

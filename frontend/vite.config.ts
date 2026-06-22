@@ -7,6 +7,7 @@ import react from "@vitejs/plugin-react";
 const apiTarget = process.env.VITE_API_PROXY || "http://localhost:8000";
 
 export default defineConfig({
+  base: "/burdello/",
   plugins: [react()],
   server: {
     host: true,
@@ -22,6 +23,13 @@ export default defineConfig({
       "/api": {
         target: apiTarget,
         changeOrigin: false,
+      },
+      // When served under the /burdello Tailscale subpath, the browser sends
+      // requests to /burdello/api/*. Rewrite them back to /api/* before proxying.
+      "/burdello/api": {
+        target: apiTarget,
+        changeOrigin: false,
+        rewrite: (path) => path.replace(/^\/burdello\/api/, "/api"),
       },
     },
   },

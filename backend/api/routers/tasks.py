@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.core.models import Project, Task
-from backend.core.schemas import TaskListResponse, TaskResponse, TaskSummary
+from backend.core.schemas import TaskCreate, TaskListResponse, TaskResponse, TaskSummary
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -281,6 +281,99 @@ async def update_task_priority(
     await db.commit()
     await db.refresh(task)
 
+    return task
+
+
+@router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
+async def create_task(
+    data: TaskCreate,
+    db: AsyncSession = Depends(get_db),
+) -> Task:
+    """Create a new task.
+
+    Args:
+        data: Task creation payload.
+        db: Async database session.
+
+    Returns:
+        Created task.
+    """
+    task = Task(
+        project_id=data.project_id,
+        title=data.title,
+        description=data.description,
+        status=data.status,
+        priority=data.priority,
+        due_date=data.due_date,
+        source_transcript_id=data.source_transcript_id,
+        notes=data.notes,
+        tags=data.tags,
+        pinned=data.pinned,
+        metadata_=data.metadata,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    return task
+
+
+@router.put("/{task_id}", response_model=TaskResponse)
+async def update_task(
+    task_id: str,
+    data: TaskCreate,
+    db: AsyncSession = Depends(get_db),
+) -> Task:
+    """Update an existing task.
+
+    Args:
+        task_id: UUID of the task.
+        data: Task update payload.
+        db: Async database session.
+
+    Returns:
+        Updated task.
+
+    Raises:
+        HTTPException: 404 if not found, 422 if invalid UUID or status.
+    """
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid UUID format: {task_id}",
+        )
+
+    result = await db.execute(select(Task).where(Task.id == task_uuid))
+    task = result.scalar_one_or_none()
+
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task with ID {task_id} not found",
+        )
+
+    if data.status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid status: {data.status}. Must be one of: {', '.join(sorted(VALID_STATUSES))}",
+        )
+
+    task.project_id = data.project_id
+    task.title = data.title
+    task.description = data.description
+    task.status = data.status
+    task.priority = data.priority
+    task.due_date = data.due_date
+    task.source_transcript_id = data.source_transcript_id
+    task.notes = data.notes
+    task.tags = data.tags
+    task.pinned = data.pinned
+    if data.metadata is not None:
+        task.metadata_ = data.metadata
+
+    await db.commit()
+    await db.refresh(task)
     return task
 
 

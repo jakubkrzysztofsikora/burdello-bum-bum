@@ -51,9 +51,23 @@ COPY pyproject.toml ./
 # Install the package itself (editable, no deps since they are in venv)
 RUN pip install --no-cache-dir --no-deps -e .
 
+# Bake the embedding model into the image. The host's TLS chain trusts
+# HuggingFace; the container's does not (corp proxy / Cloudflare WARP
+# intercepts huggingface.co). The model is pre-downloaded on the host
+# into ./.hf-cache via:
+#   HF_HOME=$(pwd)/.hf-cache python -c \
+#     "from sentence_transformers import SentenceTransformer; \
+#      SentenceTransformer('sentence-transformers/all-mpnet-base-v2')"
+# Then COPYed here. HF_HUB_OFFLINE=1 disables the revalidation HEAD call
+# that would otherwise still try to reach huggingface.co at runtime.
+ENV HF_HOME=/opt/hf-cache \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+COPY .hf-cache /opt/hf-cache
+
 # Non-root user
 RUN useradd --create-home --shell /bin/bash bbuser && \
-    chown -R bbuser:bbuser /app
+    chown -R bbuser:bbuser /app /opt/hf-cache
 USER bbuser
 
 # Expose port

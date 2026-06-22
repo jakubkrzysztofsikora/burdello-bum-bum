@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.core.models import Artifact
-from backend.core.schemas import ArtifactListResponse, ArtifactResponse
+from backend.core.schemas import ArtifactCreate, ArtifactListResponse, ArtifactResponse
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
@@ -130,6 +130,89 @@ async def get_artifact(
             detail=f"Artifact with ID {artifact_id} not found",
         )
 
+    return artifact
+
+
+@router.post("/", response_model=ArtifactResponse, status_code=status.HTTP_201_CREATED)
+async def create_artifact(
+    data: ArtifactCreate,
+    db: AsyncSession = Depends(get_db),
+) -> Artifact:
+    """Create a new artifact.
+
+    Args:
+        data: Artifact creation payload.
+        db: Async database session.
+
+    Returns:
+        Created artifact.
+    """
+    artifact = Artifact(
+        project_id=data.project_id,
+        artifact_type=data.artifact_type,
+        name=data.name,
+        content=data.content,
+        source_transcript_id=data.source_transcript_id,
+        notes=data.notes,
+        tags=data.tags,
+        pinned=data.pinned,
+        metadata_=data.metadata,
+    )
+    db.add(artifact)
+    await db.commit()
+    await db.refresh(artifact)
+    return artifact
+
+
+@router.put("/{artifact_id}", response_model=ArtifactResponse)
+async def update_artifact(
+    artifact_id: str,
+    data: ArtifactCreate,
+    db: AsyncSession = Depends(get_db),
+) -> Artifact:
+    """Update an existing artifact.
+
+    Args:
+        artifact_id: UUID of the artifact.
+        data: Artifact update payload.
+        db: Async database session.
+
+    Returns:
+        Updated artifact.
+
+    Raises:
+        HTTPException: 404 if not found, 422 if invalid UUID.
+    """
+    try:
+        artifact_uuid = uuid.UUID(artifact_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid UUID format: {artifact_id}",
+        )
+
+    result = await db.execute(select(Artifact).where(Artifact.id == artifact_uuid))
+    artifact = result.scalar_one_or_none()
+
+    if artifact is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact with ID {artifact_id} not found",
+        )
+
+    artifact.project_id = data.project_id
+    artifact.artifact_type = data.artifact_type
+    artifact.name = data.name
+    artifact.content = data.content
+    artifact.source_transcript_id = data.source_transcript_id
+    artifact.notes = data.notes
+    artifact.tags = data.tags
+    artifact.pinned = data.pinned
+    if data.metadata is not None:
+        artifact.metadata_ = data.metadata
+
+    await db.commit()
+    await db.refresh(artifact)
     return artifact
 
 
