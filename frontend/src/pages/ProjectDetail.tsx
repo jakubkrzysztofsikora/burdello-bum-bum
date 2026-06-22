@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, CheckSquare, FileText, Upload, List, LayoutTemplate } from "lucide-react";
+import { ArrowLeft, CheckSquare, FileText, Upload, List, LayoutTemplate, Bookmark } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { StatusBadge } from "../components/StatusBadge";
 import { TaskCard } from "../components/TaskCard";
 import { TranscriptCard } from "../components/TranscriptCard";
 import { KanbanBoard } from "../components/KanbanBoard";
-import { useProject, useTasks, useTranscripts } from "../hooks/useApi";
+import { useProject, useTasks, useTranscripts, useBookmarks } from "../hooks/useApi";
 
 const COLORS = ["#3b82f6", "#f59e0b", "#22c55e", "#ef4444"];
 
@@ -16,9 +16,11 @@ export function ProjectDetail() {
   const { data: project, isLoading: projectLoading } = useProject(id || "");
   const { data: tasksData } = useTasks({ project_id: id });
   const { data: transcriptsData } = useTranscripts({ project_name: project?.name });
+  const { data: bookmarksData } = useBookmarks({ project_id: id });
 
   const tasks = tasksData?.items || [];
   const transcripts = transcriptsData?.items || [];
+  const bookmarks = bookmarksData?.items || [];
 
   const statusCounts = {
     todo: tasks.filter((t) => t.status === "todo").length,
@@ -164,6 +166,44 @@ export function ProjectDetail() {
             <div className="py-4 text-center text-xs text-bb-muted">No transcripts</div>
           ) : (
             transcripts.map((t) => <TranscriptCard key={t.id} transcript={t} />)
+          )}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+          <Bookmark size={16} /> Bookmarks ({bookmarks.length})
+        </h2>
+        <div className="space-y-2">
+          {bookmarks.length === 0 ? (
+            <div className="py-4 text-center text-xs text-bb-muted">No bookmarks</div>
+          ) : (
+            bookmarks.map((b) => (
+              <div
+                key={b.id}
+                className="rounded-lg border border-bb-border bg-bb-card p-4"
+              >
+                <p className="text-sm">{b.note_text}</p>
+                <div className="mt-2 flex items-center gap-2 text-xs text-bb-muted">
+                  <span>{b.author || "agent"}</span>
+                  <span>·</span>
+                  <span>{new Date(b.created_at).toLocaleString()}</span>
+                  <span className="flex-1" />
+                  {b.transcript_id ? (
+                    <Link
+                      to={`/transcripts/${b.transcript_id}`}
+                      className="text-bb-accent hover:underline"
+                    >
+                      view session
+                    </Link>
+                  ) : b.ingest_status === "failed" ? (
+                    <span className="text-bb-muted">ingest failed</span>
+                  ) : (
+                    <span className="text-bb-muted">session ingesting…</span>
+                  )}
+                </div>
+              </div>
+            ))
           )}
         </div>
       </div>

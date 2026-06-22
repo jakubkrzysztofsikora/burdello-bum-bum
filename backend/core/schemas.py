@@ -380,7 +380,7 @@ class ArtifactListResponse(BaseModel):
 class BookmarkCreate(BaseModel):
     """Request body for creating a bookmark."""
 
-    note_text: str = Field(..., max_length=4000)
+    note_text: str = Field(..., min_length=1, max_length=4000)
     project_id: uuid.UUID | None = None
     project_name: str | None = Field(default=None, max_length=255)
     session_id: str | None = Field(default=None, max_length=255)
@@ -389,6 +389,20 @@ class BookmarkCreate(BaseModel):
     tags: list[str] | None = Field(default_factory=list)
     pinned: bool | None = False
     metadata: dict[str, Any] | None = Field(default_factory=dict)
+
+
+class BookmarkUpdate(BaseModel):
+    """Request body for patching a bookmark (all fields optional).
+
+    Distinct from ``BookmarkCreate`` so a partial update (e.g. toggling
+    ``pinned``) does not require resending ``note_text``. ``note_text`` is
+    constrained to a non-empty string when present so a PATCH can never blank
+    out the NOT NULL note column.
+    """
+
+    note_text: str | None = Field(default=None, min_length=1, max_length=4000)
+    pinned: bool | None = None
+    tags: list[str] | None = None
 
 
 class BookmarkResponse(BaseModel):

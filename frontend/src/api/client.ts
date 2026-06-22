@@ -10,9 +10,10 @@ import type {
   Task,
   Source,
   Artifact,
+  Bookmark,
 } from "./types";
 
-const API_BASE = "/api/v1";
+const API_BASE = "api/v1";
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -97,6 +98,12 @@ export const api = {
   getArtifact: (id: string): Promise<Artifact> =>
     fetchJson(`${API_BASE}/artifacts/${id}`),
 
+  // Bookmarks
+  listBookmarks: (
+    params?: FilterParams,
+  ): Promise<{ items: Bookmark[]; total: number }> =>
+    fetchJson(`${API_BASE}/bookmarks/?${buildQuery(params)}`),
+
   // Search
   search: (
     query: string,
@@ -118,7 +125,7 @@ export const api = {
 
   // Ingest
   triggerIngest: (): Promise<{ status: string }> =>
-    fetchJson(`${API_BASE}/ingest`, { method: "POST" }),
+    fetchJson(`${API_BASE}/ingest/`, { method: "POST" }),
 
   // Todoist
   exportToTodoist: (

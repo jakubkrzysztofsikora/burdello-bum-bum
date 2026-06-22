@@ -67,6 +67,21 @@ export interface Task {
   updated_at?: string | null;
 }
 
+export interface Bookmark {
+  id: string;
+  project_id: string | null;
+  transcript_id: string | null;
+  session_id: string | null;
+  session_path: string | null;
+  note_text: string;
+  author: string | null;
+  ingest_status: string;
+  tags: string[] | null;
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SearchResult {
   chunk_id: string;
   transcript_id: string;
