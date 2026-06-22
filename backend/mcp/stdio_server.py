@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -149,6 +150,52 @@ async def search_transcripts(query: str, limit: int = 10) -> dict[str, Any]:
 async def get_stats() -> dict[str, Any]:
     """Total counts of transcripts / projects / tasks / artifacts."""
     return await _call("/get_stats")
+
+
+@mcp.tool()
+async def create_bookmark(
+    note_text: str, tags: list[str] | None = None
+) -> dict[str, Any]:
+    """Persist a bookmark — a durable note on this project, visible in future
+    sessions and on the burdello web board — for something worth returning to:
+    an unresolved bug, a deferred refactor, a design question you couldn't
+    settle, a 'come back and verify X'. Use when you'd otherwise lose the
+    thread between sessions. One bookmark per distinct thread; don't
+    re-bookmark something you already noted this session. Not for routine
+    status — only things a future you would want surfaced."""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    cwd = os.getcwd()
+    spath = None
+    if sid:
+        # Claude encodes the cwd by replacing every "/" with "-"; since cwd is
+        # absolute it already begins with "/", so the leading "-" comes for
+        # free. (Do NOT prepend another "-" — that yields a double dash and the
+        # file is never found.)
+        enc = cwd.replace("/", "-")
+        p = Path.home() / ".claude" / "projects" / enc / f"{sid}.jsonl"
+        spath = str(p) if p.is_file() else None
+    return await _call(
+        "/create_bookmark",
+        {
+            "note_text": note_text,
+            "tags": tags,
+            "session_id": sid,
+            "session_path": spath,
+            "cwd": cwd,
+        },
+    )
+
+
+@mcp.tool()
+async def list_bookmarks(
+    project_name: str | None = None, limit: int = 50
+) -> dict[str, Any]:
+    """List bookmarks for a project (pinned + newest first). Call at session
+    start to see what past sessions flagged. Defaults to the current repo."""
+    return await _call(
+        "/list_bookmarks",
+        {"project_name": project_name, "cwd": os.getcwd(), "limit": limit},
+    )
 
 
 if __name__ == "__main__":

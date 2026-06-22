@@ -123,6 +123,27 @@ const TOOLS: ToolDef[] = [
     inputSchema: { type: "object", properties: {} },
     backendPath: "/get_stats",
   },
+  // NOTE: list_bookmarks is exposed here (read-only), but create_bookmark is
+  // deliberately NOT. Claude.ai has no shared env/filesystem with the ingest
+  // box, so it cannot resolve a real session_id or transcript path — a
+  // Worker-side create would only ever produce orphan project-notes and fire
+  // doomed focused-ingest jobs against paths that don't exist on the backend.
+  // create_bookmark lives only on the stdio server (Claude Code), which shares
+  // the agent's env and cwd. See plan R1 / Phase 3 cross-transport split.
+  {
+    name: "list_bookmarks",
+    description:
+      "List bookmarks for a project, pinned and newest first. Provide project_name (Claude.ai has no working directory to infer it). Call at session start to see what past sessions flagged.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_name: { type: "string" },
+        limit: { type: "integer", default: 50 },
+      },
+      required: ["project_name"],
+    },
+    backendPath: "/list_bookmarks",
+  },
 ];
 
 // ---------------------------------------------------------------------------
