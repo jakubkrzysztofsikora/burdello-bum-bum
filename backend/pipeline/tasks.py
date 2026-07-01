@@ -153,12 +153,14 @@ def process_source(self, source_path: str, provider_hint: str | None = None) -> 
     """
     logger.info("process_source: launching pipeline for %s", source_path)
 
-    # Launch the pipeline chain
+    # Launch the pipeline chain. chunk+embed are fused into one task so a large
+    # fan-out doesn't run every chunk_task before any embed_task (FIFO staging):
+    # each transcript reaches `completed` before the next starts, keeping the
+    # mining queue fed instead of starved behind the whole chunk backlog.
     result = (
         extract_task.s(source_path, provider_hint)
         | normalize_task.s()
-        | chunk_task.s()
-        | embed_task.s()
+        | chunk_embed_task.s()
         | mine_task.s()
     ).apply_async()
 
@@ -225,6 +227,7 @@ def extract_task(self, source_path: str, provider: str | None = None) -> dict[st
                 "skill": chosen.skill_name,
                 "session_id": chosen.session_id,
                 "project_name": chosen.project_name,
+                **chosen.metadata,
             },
         }
     else:
@@ -250,8 +253,20 @@ def extract_task(self, source_path: str, provider: str | None = None) -> dict[st
 
     # Deterministic project identity from path — overrides whatever the LLM
     # will try to invent in mine_task. See backend/pipeline/repo_resolver.py.
-    from backend.pipeline.repo_resolver import resolve_from_path
+    from backend.pipeline.repo_resolver import resolve_from_path, resolve_from_cwd
     identity = resolve_from_path(source_path)
+
+    # Non-Claude providers (Kimi, Gemini, Codex) always resolve to
+    # "unsorted-*" from path alone — their session files live under
+    # flat provider dirs with no project segment. When session
+    # metadata carries a cwd (common for Codex), resolve the REAL
+    # project via resolve_from_cwd and override the bucket identity.
+    if identity is not None and identity.slug.startswith("unsorted-"):
+        cwd = extracted.get("metadata", {}).get("cwd")
+        if cwd:
+            cwd_identity = resolve_from_cwd(cwd)
+            if cwd_identity is not None:
+                identity = cwd_identity
 
     return {
         "source_path": source_path,
@@ -590,9 +605,26 @@ def mine_task(self, embed_result: dict[str, Any]) -> dict[str, Any]:
                     .where(Transcript.id == transcript_id)
                 )
             ).scalar_one_or_none()
+
+            from backend.pipeline.repo_resolver import resolve_from_path, resolve_from_cwd
             identity = (
                 resolve_from_path(source_path_row) if source_path_row else None
             )
+
+            # Non-Claude providers (Kimi, Gemini, Codex) always resolve to
+            # "unsorted-*" from path alone. When the transcript metadata
+            # carries a cwd, resolve the REAL project via resolve_from_cwd.
+            if identity is not None and identity.slug.startswith("unsorted-"):
+                transcript_meta = (
+                    await db.execute(
+                        select(Transcript.metadata_).where(Transcript.id == transcript_id)
+                    )
+                ).scalar_one_or_none()
+                cwd = (transcript_meta or {}).get("cwd")
+                if cwd:
+                    cwd_identity = resolve_from_cwd(cwd)
+                    if cwd_identity is not None:
+                        identity = cwd_identity
 
             results = await engine.mine_transcript(
                 transcript_id,

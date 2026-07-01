@@ -11,6 +11,10 @@ import type {
   Source,
   Artifact,
   Bookmark,
+  TodoistProjectSummary,
+  TodoistSyncPlanResponse,
+  TodoistSyncRunDetail,
+  TodoistSyncRunListResponse,
 } from "./types";
 
 const API_BASE = "api/v1";
@@ -128,13 +132,36 @@ export const api = {
     fetchJson(`${API_BASE}/ingest/`, { method: "POST" }),
 
   // Todoist
+  listTodoistProjects: (): Promise<TodoistProjectSummary[]> =>
+    fetchJson(`${API_BASE}/todoist/projects`),
+  previewTodoistSync: (
+    projectId: string,
+    includeDone = false,
+  ): Promise<TodoistSyncPlanResponse> =>
+    fetchJson(
+      `${API_BASE}/todoist/sync/project/${projectId}/plan?include_done=${includeDone}`,
+      { method: "POST" },
+    ),
+  runTodoistSync: (
+    projectId: string,
+    includeDone = false,
+  ): Promise<TodoistSyncRunDetail> =>
+    fetchJson(
+      `${API_BASE}/todoist/sync/project/${projectId}?include_done=${includeDone}`,
+      { method: "POST" },
+    ),
+  listTodoistSyncRuns: (
+    projectId: string,
+  ): Promise<TodoistSyncRunListResponse> =>
+    fetchJson(`${API_BASE}/todoist/sync/project/${projectId}/runs`),
+  getTodoistSyncRun: (runId: string): Promise<TodoistSyncRunDetail> =>
+    fetchJson(`${API_BASE}/todoist/sync/runs/${runId}`),
   exportToTodoist: (
     projectId: string,
-    todoistProjectId?: string,
-  ): Promise<unknown> =>
-    fetchJson(`${API_BASE}/todoist/export/project/${projectId}`, {
+    includeDone = false,
+  ): Promise<TodoistSyncRunDetail> =>
+    fetchJson(`${API_BASE}/todoist/export/project/${projectId}?include_done=${includeDone}`, {
       method: "POST",
-      body: JSON.stringify({ todoist_project_id: todoistProjectId }),
     }),
 
   // Mining

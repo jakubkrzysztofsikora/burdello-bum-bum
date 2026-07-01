@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom";
-import { Search, RefreshCw, Upload, TrendingUp, FileText, FolderKanban } from "lucide-react";
+import { Search, RefreshCw, Upload, TrendingUp, FileText, FolderKanban, Pin } from "lucide-react";
 import { StatsCards } from "../components/StatsCards";
 import { TranscriptCard } from "../components/TranscriptCard";
 import { ProjectCard } from "../components/ProjectCard";
-import { useStats, useTranscripts, useProjects, useTriggerIngest } from "../hooks/useApi";
+import { useStats, useTranscripts, useProjects, useTriggerIngest, useBookmarks } from "../hooks/useApi";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#ec4899", "#06b6d4"];
@@ -12,10 +12,12 @@ export function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useStats();
   const { data: transcriptsData } = useTranscripts({ limit: 10, sort: "started_at", order: "desc" });
   const { data: projectsData } = useProjects({ limit: 5, sort: "last_activity_at", order: "desc" });
+  const { data: bookmarksData } = useBookmarks({ limit: 10 });
   const ingest = useTriggerIngest();
 
   const transcripts = transcriptsData?.items || [];
   const projects = projectsData?.items || [];
+  const bookmarks = bookmarksData?.items || [];
 
   const statusChartData = stats
     ? Object.entries(stats.status_breakdown).map(([name, value]) => ({ name, value }))
@@ -47,7 +49,7 @@ export function Dashboard() {
             to="/todoist"
             className="flex items-center gap-1.5 rounded-md border border-bb-border px-3 py-1.5 text-xs text-bb-muted transition hover:text-bb-text"
           >
-            <Upload size={12} /> Export
+            <Upload size={12} /> Sync
           </Link>
         </div>
       </div>
@@ -115,6 +117,50 @@ export function Dashboard() {
           )}
         </div>
       </div>
+
+      {bookmarks.length > 0 && (
+        <div className="rounded-lg border border-bb-border bg-bb-card p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <Pin size={14} /> Bookmarks
+            </h2>
+          </div>
+          <div className="space-y-2">
+            {bookmarks.map((b) => (
+              <div
+                key={b.id}
+                className="rounded border border-bb-border bg-bb-surface p-3 text-xs"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-bb-text whitespace-pre-line leading-relaxed">
+                    {b.note_text.length > 200
+                      ? b.note_text.slice(0, 200) + "..."
+                      : b.note_text}
+                  </p>
+                  {b.pinned && <Pin size={10} className="mt-0.5 shrink-0 text-bb-accent" />}
+                </div>
+                {b.tags && b.tags.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {b.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded bg-bb-accent/10 px-1.5 py-0.5 text-[10px] text-bb-accent"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2 flex items-center gap-2 text-[10px] text-bb-muted">
+                  <span>{b.author || "unknown"}</span>
+                  <span>·</span>
+                  <span>{new Date(b.created_at).toLocaleDateString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-lg border border-bb-border bg-bb-card p-4">

@@ -365,6 +365,10 @@ class Project(Base, TimestampMixin):
     bookmarks: Mapped[list["Bookmark"]] = relationship(
         back_populates="project",
     )
+    todoist_sync_runs: Mapped[list["TodoistSyncRun"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return (
@@ -433,6 +437,11 @@ class Task(Base, TimestampMixin):
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="tasks")
+    todoist_link: Mapped["TodoistTaskLink | None"] = relationship(
+        back_populates="task",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return (
@@ -698,4 +707,163 @@ class Bookmark(Base, TimestampMixin):
             f"project_id={self.project_id!s}, "
             f"session_id={self.session_id!r}, "
             f"note={note_preview!r}...)>"
+        )
+
+
+class TodoistSyncRun(Base, TimestampMixin):
+    """A single Todoist sync execution for a Burdello project."""
+
+    __tablename__ = "todoist_sync_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    project_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="running",
+        comment="running, completed, partial, failed",
+    )
+    mode: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="auto",
+        comment="auto, manual, dry_run",
+    )
+    include_done: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+    )
+    todoist_inbox_project_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    plan_data: Mapped[dict | None] = mapped_column(
+        "plan_data",
+        JSONB,
+        nullable=True,
+        default=dict,
+    )
+    result_data: Mapped[dict | None] = mapped_column(
+        "result_data",
+        JSONB,
+        nullable=True,
+        default=dict,
+    )
+    error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+    )
+
+    project: Mapped["Project"] = relationship(back_populates="todoist_sync_runs")
+    task_links: Mapped[list["TodoistTaskLink"]] = relationship(
+        back_populates="sync_run",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<TodoistSyncRun(id={self.id!s}, "
+            f"project_id={self.project_id!s}, "
+            f"status={self.status!r})>"
+        )
+
+
+class TodoistTaskLink(Base, TimestampMixin):
+    """Stable mapping between a Burdello task and a Todoist task."""
+
+    __tablename__ = "todoist_task_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    epic_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+    epic_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    todoist_project_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+    )
+    todoist_project_name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    todoist_task_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    sync_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("todoist_sync_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_payload: Mapped[dict | None] = mapped_column(
+        "last_payload",
+        JSONB,
+        nullable=True,
+        default=dict,
+    )
+    last_result: Mapped[dict | None] = mapped_column(
+        "last_result",
+        JSONB,
+        nullable=True,
+        default=dict,
+    )
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+    )
+
+    task: Mapped["Task"] = relationship(back_populates="todoist_link")
+    sync_run: Mapped["TodoistSyncRun | None"] = relationship(
+        back_populates="task_links",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<TodoistTaskLink(id={self.id!s}, "
+            f"task_id={self.task_id!s}, "
+            f"todoist_task_id={self.todoist_task_id!r})>"
         )

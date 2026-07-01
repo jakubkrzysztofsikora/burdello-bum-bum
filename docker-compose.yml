@@ -57,7 +57,7 @@ services:
     container_name: bb-redis
     command: >
       redis-server
-      --maxmemory 1536mb
+      --maxmemory 3gb
       --maxmemory-policy noeviction
       --save ""
     ports:
@@ -72,9 +72,11 @@ services:
     deploy:
       resources:
         limits:
-          # Headroom above the 1536mb maxmemory; Redis is the Celery broker +
+          # Headroom above the 3gb maxmemory; Redis is the Celery broker +
           # result backend, so it must not evict (noeviction) under load.
-          memory: 2g
+          # At ~5 result-meta keys per transcript chain, a full re-ingest of
+          # ~5k transcripts overflows a smaller cap mid-dispatch.
+          memory: 4g
     networks:
       - bb-network
 
@@ -186,9 +188,11 @@ services:
     deploy:
       resources:
         limits:
-          # Embedding worker (concurrency=1) holding the resident model plus
-          # transient encode memory, sized to leave room for the mining worker.
-          memory: 4000m
+          # concurrency=3 means up to 3 forked children, each loading the
+          # ~1GB sentence-transformer model plus transient encode buffers.
+          # 4000m starved them — they thrashed at the cap and throughput
+          # collapsed to ~7/90s. 8g gives each child real headroom.
+          memory: 8g
     # litellm is a Tailscale node (100.114.245.86 / litellm.tail5d39b4.ts.net).
     extra_hosts:
       - "litellm:100.116.31.6"

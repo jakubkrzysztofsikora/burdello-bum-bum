@@ -13,7 +13,7 @@ Burdello Bum-Bum ("BB") is a **local-first** web application that:
 - **Mines** projects, tasks, threads, artifacts, and statuses using LLM-powered extraction
 - **Searches** across everything with hybrid search (full-text + vector + metadata filters)
 - **Displays** data hierarchically (Project > Task > Thread) with multiple detail levels
-- **Exports** to Todoist for project/task synchronization
+- **Syncs** to Todoist for project/task synchronization
 
 ## Architecture
 
@@ -158,12 +158,12 @@ The system will:
 - **Transcripts**: Full conversation viewer with tool call highlighting
 - **Search**: Advanced search with filters and similarity matching
 
-### Todoist Export
+### Todoist Sync
 
-- Export projects as Todoist projects
-- Export tasks with priorities, due dates, and descriptions
-- Sync status tracking
-- Bulk export with filtering
+- Sync a chosen Burdello project into matching existing Todoist projects
+- Group tasks into epics on the fly before routing them
+- Persist sync runs and task links for idempotent reruns
+- Fall back to Todoist Inbox when no confident project match exists
 
 ## API Reference
 
@@ -207,10 +207,14 @@ POST   /api/v1/mining/transcript/{id}  Trigger mining
 GET    /api/v1/mining/transcript/{id}  Get mining results
 GET    /api/v1/mining/abandoned   Find abandoned work
 
-GET    /api/v1/todoist/projects         List Todoist projects
-POST   /api/v1/todoist/export/project/{id}  Export project
-POST   /api/v1/todoist/export/task/{id}     Export task
-GET    /api/v1/todoist/sync-status    Sync status
+GET    /api/v1/todoist/projects               List Todoist projects
+POST   /api/v1/todoist/sync/project/{id}/plan  Preview sync plan
+POST   /api/v1/todoist/sync/project/{id}       Run project sync
+GET    /api/v1/todoist/sync/project/{id}/runs  List sync history
+GET    /api/v1/todoist/sync/runs/{run_id}      Get a sync run
+POST   /api/v1/todoist/export/project/{id}     Compatibility wrapper
+POST   /api/v1/todoist/export/task/{id}        Export task
+GET    /api/v1/todoist/sync-status             Sync status
 ```
 
 ## Development

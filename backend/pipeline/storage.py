@@ -348,27 +348,48 @@ class PipelineStorage:
         primary_project_id = next(iter(project_ids.values()), None)
 
         # --- Tasks ---
+        _STATUS_RANK = {"done": 3, "cancelled": 2, "in_progress": 1, "todo": 0}
+
         for task_data in results.get("tasks", []):
             title = (task_data.get("title") or "").strip()
             if not title:
                 continue
-            status = self._TASK_STATUS_MAP.get(
+            inferred_status = self._TASK_STATUS_MAP.get(
                 str(task_data.get("status", "")).lower(), "todo"
             )
-            priority = self._PRIORITY_MAP.get(
+            inferred_priority = self._PRIORITY_MAP.get(
                 str(task_data.get("priority", "")).lower(), "medium"
             )
-            self.db.add(
-                Task(
-                    project_id=primary_project_id,
-                    title=title,
-                    description=task_data.get("description"),
-                    status=status,
-                    priority=priority,
-                    source_transcript_id=transcript_id,
-                    metadata_={"confidence": task_data.get("confidence")},
+
+            existing = (
+                await self.db.execute(
+                    select(Task).where(
+                        Task.project_id == primary_project_id,
+                        Task.title == title,
+                    )
                 )
-            )
+            ).scalar_one_or_none()
+
+            if existing is not None:
+                current_rank = _STATUS_RANK.get(existing.status, 0)
+                inferred_rank = _STATUS_RANK.get(inferred_status, 0)
+                if inferred_rank > current_rank:
+                    existing.status = inferred_status
+                    existing.description = task_data.get("description") or existing.description
+                if not existing.source_transcript_id:
+                    existing.source_transcript_id = transcript_id
+            else:
+                self.db.add(
+                    Task(
+                        project_id=primary_project_id,
+                        title=title,
+                        description=task_data.get("description"),
+                        status=inferred_status,
+                        priority=inferred_priority,
+                        source_transcript_id=transcript_id,
+                        metadata_={"confidence": task_data.get("confidence")},
+                    )
+                )
             counts["tasks"] += 1
 
         # --- Artifacts ---

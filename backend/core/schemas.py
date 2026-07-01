@@ -535,7 +535,7 @@ class SkillInfoResponse(BaseModel):
 
 
 # ===========================================================================
-# Todoist Export Schemas
+# Todoist Sync Schemas
 # ===========================================================================
 
 
@@ -553,6 +553,78 @@ class TodoistExportResponse(BaseModel):
 
     exported_count: int
     todoist_project_id: str | None = None
+
+
+class TodoistProjectSummary(BaseModel):
+    """Compact representation of a Todoist project."""
+
+    id: str
+    name: str
+
+
+class TodoistEpicMatch(BaseModel):
+    """Result of matching an epic to an existing Todoist project."""
+
+    todoist_project_id: str | None = None
+    todoist_project_name: str | None = None
+    score: float | None = None
+    reason: str | None = None
+    source: str | None = None
+
+
+class TodoistSyncEpic(BaseModel):
+    """Grouped epic bucket produced by the sync planner."""
+
+    epic_key: str
+    epic_name: str
+    summary: str | None = None
+    task_count: int
+    task_ids: list[uuid.UUID]
+    match: TodoistEpicMatch
+
+
+class TodoistSyncPlanResponse(BaseModel):
+    """Preview output for a Todoist sync run."""
+
+    project_id: uuid.UUID
+    project_name: str
+    include_done: bool
+    todoist_inbox_project_id: str | None = None
+    todoist_projects_error: str | None = None
+    todoist_projects: list[TodoistProjectSummary]
+    epics: list[TodoistSyncEpic]
+    skipped_done: int = 0
+    total_tasks: int = 0
+    eligible_tasks: int = 0
+
+
+class TodoistSyncRunSummary(BaseModel):
+    """Stored metadata for a completed Todoist sync run."""
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    project_name: str
+    status: str
+    include_done: bool
+    todoist_inbox_project_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    error_text: str | None = None
+    metrics: dict[str, Any] | None = None
+
+
+class TodoistSyncRunDetail(TodoistSyncRunSummary):
+    """Full Todoist sync run, including the persisted plan/result payloads."""
+
+    plan_data: dict[str, Any] | None = None
+    result_data: dict[str, Any] | None = None
+
+
+class TodoistSyncRunListResponse(BaseModel):
+    """Paginated sync history."""
+
+    items: list[TodoistSyncRunSummary]
+    total: int
 
 
 # ===========================================================================

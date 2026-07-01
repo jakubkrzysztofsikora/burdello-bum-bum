@@ -16,6 +16,17 @@ For each task found, provide:
 - priority: One of "low", "medium", "high", "urgent"
 - confidence: Float 0.0-1.0
 
+CRITICAL — status inference rules:
+- Infer "done" ONLY when the transcript contains clear evidence the work was COMPLETED:
+  commit pushed, deployment confirmed, "that's done", "finished", "works now",
+  test passes, PR merged, etc. Do NOT mark speculative future work as done.
+- Infer "in_progress" when the transcript shows active work being performed RIGHT NOW:
+  editing files, running tests, debugging, making code changes mid-session.
+- Default to "todo" when a task is only mentioned or planned but no visible
+  progress/completion is evidenced in THIS transcript.
+- Use "cancelled" when a task is explicitly abandoned or decided against.
+- Use "blocked" when the transcript mentions a blocker preventing progress.
+
 EXCLUDE meta-tasks about the agent's own workflow: creating PLAN.md,
 DIVERGENCES.md, STARTED_WORK timestamps, handoff notes, summarising the session,
 documenting deviations, "report findings", "run self-check validation", etc.
@@ -26,7 +37,7 @@ session is operating in. It is NOT a topical filter: extract ALL real tasks
 regardless of whether they relate to the working repo directly. Do not omit
 or rewrite tasks just to make them sound about the working repo.
 
-Return ONLY a JSON array of task objects. No markdown, no explanation.
+Return ONLY a JSON array of task objects. Nodown, no explanation.
 
 Working Repo: {project_context}
 

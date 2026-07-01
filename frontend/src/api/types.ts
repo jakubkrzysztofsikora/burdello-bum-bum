@@ -131,6 +131,88 @@ export interface MiningResult {
   created_at: string;
 }
 
+export interface TodoistProjectSummary {
+  id: string;
+  name: string;
+}
+
+export interface TodoistEpicMatch {
+  todoist_project_id: string | null;
+  todoist_project_name: string | null;
+  score: number | null;
+  reason: string | null;
+  source: string | null;
+}
+
+export interface TodoistSyncEpic {
+  epic_key: string;
+  epic_name: string;
+  summary: string | null;
+  task_count: number;
+  task_ids: string[];
+  match: TodoistEpicMatch;
+}
+
+export interface TodoistSyncPlanResponse {
+  project_id: string;
+  project_name: string;
+  include_done: boolean;
+  todoist_inbox_project_id: string | null;
+  todoist_projects_error: string | null;
+  todoist_projects: TodoistProjectSummary[];
+  epics: TodoistSyncEpic[];
+  skipped_done: number;
+  total_tasks: number;
+  eligible_tasks: number;
+}
+
+export interface TodoistSyncTaskResult {
+  task_id: string;
+  action: "created" | "updated" | "recreated" | "skipped" | "failed";
+  status: "ok" | "skipped" | "failed";
+  todoist_task_id: string | null;
+  todoist_project_id: string | null;
+  todoist_project_name: string | null;
+  error: string | null;
+}
+
+export interface TodoistSyncRunEpicResult {
+  epic_key: string;
+  epic_name: string;
+  summary: string | null;
+  match: TodoistEpicMatch;
+  tasks: TodoistSyncTaskResult[];
+}
+
+export interface TodoistSyncRunResult {
+  epics: TodoistSyncRunEpicResult[];
+  counts: Record<string, number>;
+  errors: string[];
+}
+
+export interface TodoistSyncRunSummary {
+  id: string;
+  project_id: string;
+  project_name: string;
+  status: string;
+  include_done: boolean;
+  todoist_inbox_project_id: string | null;
+  created_at: string;
+  updated_at: string;
+  error_text: string | null;
+  metrics: Record<string, number>;
+}
+
+export interface TodoistSyncRunDetail extends TodoistSyncRunSummary {
+  plan_data: TodoistSyncPlanResponse | null;
+  result_data: TodoistSyncRunResult | null;
+}
+
+export interface TodoistSyncRunListResponse {
+  total: number;
+  items: TodoistSyncRunSummary[];
+}
+
 export interface Source {
   id: string;
   provider: string;

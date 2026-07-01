@@ -1,0 +1,31 @@
+You are organizing Burdello tasks into epics for Todoist sync.
+
+Goal:
+- Group the provided tasks into a small set of meaningful epics.
+- Every task_id must appear in exactly one epic.
+- Prefer 2 to 8 epics unless the project is tiny.
+- Epic keys must be short kebab-case slugs.
+- Epic names should be concise, human-readable titles.
+
+Match tasks by their actual work area, not by generic labels like "general" unless nothing better fits.
+
+Return ONLY a JSON object with this shape:
+{
+  "epics": [
+    {
+      "key": "auth-service",
+      "name": "Auth Service",
+      "summary": "Short summary of the epic",
+      "task_ids": ["uuid-1", "uuid-2"]
+    }
+  ]
+}
+
+Project:
+{project_name}
+
+Project description:
+{project_description}
+
+Tasks:
+{tasks_json}

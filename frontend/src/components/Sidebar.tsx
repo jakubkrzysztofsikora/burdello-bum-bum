@@ -18,7 +18,7 @@ const LINKS = [
   { to: "/artifacts", label: "Artifacts", icon: Layers },
   { to: "/transcripts", label: "Transcripts", icon: FileText },
   { to: "/search", label: "Search", icon: Search },
-  { to: "/todoist", label: "Todoist Export", icon: Upload },
+  { to: "/todoist", label: "Todoist Sync", icon: Upload },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

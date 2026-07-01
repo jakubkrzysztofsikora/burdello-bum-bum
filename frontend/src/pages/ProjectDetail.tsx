@@ -59,10 +59,10 @@ export function ProjectDetail() {
         </div>
         <StatusBadge status={project.status} />
         <Link
-          to="/todoist"
+          to={`/todoist?project=${project.id}`}
           className="flex items-center gap-1.5 rounded-md bg-bb-accent/20 px-3 py-1.5 text-xs font-medium text-bb-accent transition hover:bg-bb-accent/30"
         >
-          <Upload size={12} /> Export
+          <Upload size={12} /> Sync
         </Link>
       </div>
 

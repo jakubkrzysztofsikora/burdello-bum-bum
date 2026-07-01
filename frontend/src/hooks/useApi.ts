@@ -12,6 +12,9 @@ import type {
   SearchResponse,
   SkillInfo,
   MiningResult,
+  TodoistProjectSummary,
+  TodoistSyncPlanResponse,
+  TodoistSyncRunListResponse,
 } from "../api/types";
 
 const STALE_TIME = 30_000;
@@ -154,6 +157,48 @@ export function useTriggerIngest() {
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["transcripts"] });
       qc.invalidateQueries({ queryKey: ["sources"] });
+    },
+  });
+}
+
+// Todoist
+export function useTodoistProjects() {
+  return useQuery<TodoistProjectSummary[], Error>({
+    queryKey: ["todoist", "projects"],
+    queryFn: () => api.listTodoistProjects(),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useTodoistSyncPlan(projectId: string, includeDone = false) {
+  return useQuery<TodoistSyncPlanResponse, Error>({
+    queryKey: ["todoist", "plan", projectId, includeDone],
+    queryFn: () => api.previewTodoistSync(projectId, includeDone),
+    enabled: !!projectId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useTodoistSyncRuns(projectId: string) {
+  return useQuery<TodoistSyncRunListResponse, Error>({
+    queryKey: ["todoist", "runs", projectId],
+    queryFn: () => api.listTodoistSyncRuns(projectId),
+    enabled: !!projectId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useRunTodoistSync() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, includeDone }: { projectId: string; includeDone: boolean }) =>
+      api.runTodoistSync(projectId, includeDone),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["todoist", "plan", vars.projectId] });
+      qc.invalidateQueries({ queryKey: ["todoist", "runs", vars.projectId] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }

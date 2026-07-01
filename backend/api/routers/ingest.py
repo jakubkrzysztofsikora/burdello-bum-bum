@@ -209,6 +209,16 @@ async def upload_transcript(
         file_path,
     )
 
+    # Queue the uploaded file for pipeline processing
+    try:
+        result = process_source.delay(str(file_path))
+    except OperationalError as exc:
+        logger.error("Upload ingest: broker unavailable: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ingest queue unavailable",
+        )
+
     # Build source data for processing
     source_data = {
         "file_path": str(file_path),
@@ -226,8 +236,9 @@ async def upload_transcript(
         "file_path": str(file_path),
         "filename": file.filename,
         "size_bytes": file_size,
-        "status": "uploaded",
+        "status": "queued",
         "message": "File uploaded successfully. Processing queued.",
+        "celery_job_id": result.id,
         "source_data": source_data,
     }
 
