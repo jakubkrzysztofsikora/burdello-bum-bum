@@ -18,7 +18,7 @@ import logging
 import re
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from backend.core.database import AsyncSessionLocal
 from backend.core.models import Artifact
@@ -161,12 +161,10 @@ async def main(dry_run: bool) -> int:
             log.info("Nothing to remove.")
             return 0
 
-        removed = 0
-        async with db.begin():
-            for artifact in to_remove:
-                await db.delete(artifact)
-                removed += 1
-        log.info("Removed %d low-level artifacts.", removed)
+        removed_ids = [artifact.id for artifact in to_remove]
+        await db.execute(delete(Artifact).where(Artifact.id.in_(removed_ids)))
+        await db.commit()
+        log.info("Removed %d low-level artifacts.", len(removed_ids))
 
     return 0
 
