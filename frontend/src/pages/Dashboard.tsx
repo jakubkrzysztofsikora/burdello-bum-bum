@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Search, RefreshCw, Upload, TrendingUp, FileText, FolderKanban, Pin } from "lucide-react";
 import { StatsCards } from "../components/StatsCards";
+import { WeeklySummary } from "../components/WeeklySummary";
 import { TranscriptCard } from "../components/TranscriptCard";
 import { ProjectCard } from "../components/ProjectCard";
 import { useStats, useTranscripts, useProjects, useTriggerIngest, useBookmarks } from "../hooks/useApi";
@@ -55,6 +56,8 @@ export function Dashboard() {
       </div>
 
       <StatsCards stats={stats} isLoading={statsLoading} />
+
+      <WeeklySummary />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-lg border border-bb-border bg-bb-card p-4">

@@ -24,7 +24,7 @@ from backend.core.models import (
     Task,
     Transcript,
 )
-from backend.core.schemas import MessageCreate, TranscriptCreate
+from backend.core.schemas import ARTIFACT_TYPES, MessageCreate, TranscriptCreate
 from backend.search.engine import HybridSearchEngine
 
 logger = logging.getLogger(__name__)
@@ -392,23 +392,43 @@ class PipelineStorage:
                 )
             counts["tasks"] += 1
 
-        # --- Artifacts ---
+        # --- Artifacts (high-level deliverables only) ---
         for art_data in results.get("artifacts", []):
             name = (art_data.get("name") or "").strip()
             if not name:
                 continue
+
+            artifact_type = str(art_data.get("type") or "").lower().strip()
+            if artifact_type not in ARTIFACT_TYPES:
+                continue
+
+            confidence = art_data.get("confidence")
+            if isinstance(confidence, (int, float)) and confidence < 0.6:
+                continue
+
+            url = str(art_data.get("url", "")).strip() if artifact_type == "link" else ""
+            if artifact_type == "link" and not url:
+                continue
+
+            tags = list(art_data.get("tags") or [])
+            if "high-level" not in tags:
+                tags.append("high-level")
+
             self.db.add(
                 Artifact(
                     project_id=primary_project_id,
-                    artifact_type=art_data.get("type") or "unknown",
+                    artifact_type=artifact_type,
                     name=name,
                     content={
                         "language": art_data.get("language"),
                         "content_preview": art_data.get("content_preview"),
                         "file_path": art_data.get("file_path"),
+                        "url": url,
+                        "significance": art_data.get("significance"),
                     },
                     source_transcript_id=transcript_id,
-                    metadata_={"confidence": art_data.get("confidence")},
+                    tags=tags,
+                    metadata_={"confidence": confidence},
                 )
             )
             counts["artifacts"] += 1

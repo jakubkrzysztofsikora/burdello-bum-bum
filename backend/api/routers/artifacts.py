@@ -25,7 +25,7 @@ async def list_artifacts(
     db: AsyncSession = Depends(get_db),
     transcript_id: str | None = Query(None, description="Filter by source transcript ID"),
     task_id: str | None = Query(None, description="Filter by related task ID"),
-    artifact_type: str | None = Query(None, description="Filter by artifact type (summary, mind_map, etc.)"),
+    artifact_type: str | None = Query(None, description="Filter by artifact type (research, plan, html, deck, document, link, report, diagram, spec, finding)"),
     search: str | None = Query(None, description="Search in artifact name"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),

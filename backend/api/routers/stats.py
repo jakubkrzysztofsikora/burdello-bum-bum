@@ -96,6 +96,124 @@ async def get_detailed_stats(db: AsyncSession = Depends(get_db)) -> dict[str, An
     }
 
 
+@router.get("/weekly-summary")
+async def get_weekly_summary(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Get a 'last week' summary for the dashboard.
+
+    Buckets:
+    - done: tasks marked done and updated in the last 7 days, plus artifacts
+      created in the last 7 days.
+    - in_progress: tasks currently in_progress and updated in the last 7 days.
+    - stale: tasks still todo/in_progress but not touched in the last 7 days.
+
+    Args:
+        db: Async database session.
+
+    Returns:
+        Dict with counts and top items for each bucket.
+    """
+    week_ago = datetime.utcnow() - timedelta(days=7)
+
+    # Project name map for display.
+    project_result = await db.execute(select(Project.id, Project.name))
+    project_names: dict[Any, str] = {r.id: r.name for r in project_result.all()}
+
+    # Done this week (tasks moved/completed to done + new artifacts).
+    done_tasks_result = await db.execute(
+        select(Task)
+        .where(Task.status == "done", Task.updated_at >= week_ago)
+        .order_by(Task.updated_at.desc())
+        .limit(10)
+    )
+    done_tasks = list(done_tasks_result.scalars().all())
+
+    recent_artifacts_result = await db.execute(
+        select(Artifact)
+        .where(Artifact.created_at >= week_ago)
+        .order_by(Artifact.created_at.desc())
+        .limit(10)
+    )
+    recent_artifacts = list(recent_artifacts_result.scalars().all())
+
+    done_items = [
+        {
+            "id": str(t.id),
+            "kind": "task",
+            "title": t.title,
+            "project_id": str(t.project_id) if t.project_id else None,
+            "project_name": project_names.get(t.project_id),
+            "status": t.status,
+            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        }
+        for t in done_tasks
+    ] + [
+        {
+            "id": str(a.id),
+            "kind": "artifact",
+            "title": a.name,
+            "project_id": str(a.project_id) if a.project_id else None,
+            "project_name": project_names.get(a.project_id),
+            "artifact_type": a.artifact_type,
+            "updated_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in recent_artifacts
+    ]
+
+    # In progress this week.
+    in_progress_result = await db.execute(
+        select(Task)
+        .where(Task.status == "in_progress", Task.updated_at >= week_ago)
+        .order_by(Task.updated_at.desc())
+        .limit(10)
+    )
+    in_progress_tasks = list(in_progress_result.scalars().all())
+    in_progress_items = [
+        {
+            "id": str(t.id),
+            "kind": "task",
+            "title": t.title,
+            "project_id": str(t.project_id) if t.project_id else None,
+            "project_name": project_names.get(t.project_id),
+            "status": t.status,
+            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        }
+        for t in in_progress_tasks
+    ]
+
+    # Stale: todo or in_progress but not updated this week.
+    stale_result = await db.execute(
+        select(Task)
+        .where(
+            Task.status.in_(["todo", "in_progress"]),
+            Task.updated_at < week_ago,
+        )
+        .order_by(Task.updated_at.asc())
+        .limit(10)
+    )
+    stale_tasks = list(stale_result.scalars().all())
+    stale_items = [
+        {
+            "id": str(t.id),
+            "kind": "task",
+            "title": t.title,
+            "project_id": str(t.project_id) if t.project_id else None,
+            "project_name": project_names.get(t.project_id),
+            "status": t.status,
+            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        }
+        for t in stale_tasks
+    ]
+
+    return {
+        "since": week_ago.isoformat(),
+        "done": {"count": len(done_items), "items": done_items},
+        "in_progress": {"count": len(in_progress_items), "items": in_progress_items},
+        "stale": {"count": len(stale_items), "items": stale_items},
+    }
+
+
 @router.get("/resolver")
 async def get_resolver_stats() -> dict[str, Any]:
     """Return repo-resolver counters and unmatched-slug curation hints.

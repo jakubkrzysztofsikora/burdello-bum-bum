@@ -129,7 +129,7 @@ async def list_artifacts(
     artifact_type: str | None = None,
     limit: int = 50,
 ) -> dict[str, Any]:
-    """List artifacts (source_code, documentation, config, test, …)."""
+    """List high-level artifacts (research, plan, html, deck, document, link, report, diagram, spec, finding)."""
     return await _call(
         "/list_artifacts",
         {

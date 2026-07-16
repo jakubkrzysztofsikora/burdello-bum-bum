@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type {
   FilterParams,
   Stats,
+  WeeklySummary,
   Transcript,
   TranscriptDetail,
   Project,
@@ -24,6 +25,14 @@ export function useStats() {
   return useQuery<Stats, Error>({
     queryKey: ["stats"],
     queryFn: () => api.getStats(),
+    staleTime: STALE_TIME,
+  });
+}
+
+export function useWeeklySummary() {
+  return useQuery<WeeklySummary, Error>({
+    queryKey: ["weekly-summary"],
+    queryFn: () => api.getWeeklySummary(),
     staleTime: STALE_TIME,
   });
 }
@@ -98,6 +107,18 @@ export function useUpdateTaskStatus() {
   return useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       api.updateTaskStatus(id, status),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+export function useBatchUpdateTaskStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskIds, status }: { taskIds: string[]; status: string }) =>
+      api.batchUpdateTaskStatus(taskIds, status),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tasks"] });
       qc.invalidateQueries({ queryKey: ["stats"] });

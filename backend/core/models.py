@@ -469,7 +469,7 @@ class Artifact(Base, TimestampMixin):
     artifact_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        comment="Type: summary, mind_map, timeline, report, etc.",
+        comment="High-level artifact type: research, plan, html, deck, document, link, report, diagram, spec, finding.",
     )
     name: Mapped[str] = mapped_column(
         String(255),

@@ -2,6 +2,7 @@ import type {
   FilterParams,
   SearchResponse,
   Stats,
+  WeeklySummary,
   SkillInfo,
   MiningResult,
   Transcript,
@@ -93,6 +94,14 @@ export const api = {
       `${API_BASE}/tasks/${id}/status?new_status=${encodeURIComponent(status)}`,
       { method: "PUT" },
     ),
+  batchUpdateTaskStatus: (
+    taskIds: string[],
+    status: string,
+  ): Promise<{ updated: number; task_ids: string[] }> =>
+    fetchJson(`${API_BASE}/tasks/batch/status`, {
+      method: "POST",
+      body: JSON.stringify({ task_ids: taskIds, status }),
+    }),
 
   // Artifacts
   listArtifacts: (
@@ -123,6 +132,8 @@ export const api = {
 
   // Stats
   getStats: (): Promise<Stats> => fetchJson(`${API_BASE}/stats`),
+  getWeeklySummary: (): Promise<WeeklySummary> =>
+    fetchJson(`${API_BASE}/stats/weekly-summary`),
 
   // Skills
   listSkills: (): Promise<SkillInfo[]> => fetchJson(`${API_BASE}/skills`),

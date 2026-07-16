@@ -282,7 +282,7 @@ class TestExtractArtifacts:
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = json.dumps([
-            {"name": "auth_service.py", "type": "source_code", "language": "python", "content_preview": "class AuthService:", "file_path": "/src/auth.py", "confidence": 0.95}
+            {"name": "Auth Service Architecture", "type": "document", "language": "markdown", "content_preview": "## Auth service design", "file_path": "/docs/auth.md", "url": "", "significance": "Design doc for the auth service.", "confidence": 0.95}
         ])
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)
 
@@ -297,7 +297,7 @@ class TestExtractArtifacts:
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = json.dumps([
-            {"name": "config.yaml", "type": "config", "language": "yaml", "content_preview": "api:", "file_path": "/config.yaml", "confidence": 0.9}
+            {"name": "API Plan", "type": "plan", "language": "markdown", "content_preview": "## API rollout plan", "file_path": "/docs/plan.md", "url": "", "significance": "Rollout plan for the API.", "confidence": 0.9}
         ])
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)
 
@@ -310,6 +310,24 @@ class TestExtractArtifacts:
         assert "content_preview" in artifact
         assert "file_path" in artifact
         assert "confidence" in artifact
+
+    @pytest.mark.asyncio
+    async def test_filters_out_routine_artifacts(self, mining_engine, mock_litellm, sample_transcript):
+        """Routine source files and low-confidence items are dropped."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps([
+            {"name": "auth_service.py", "type": "source_code", "language": "python", "content_preview": "class AuthService:", "file_path": "/src/auth.py", "url": "", "significance": "", "confidence": 0.95},
+            {"name": "API Plan", "type": "plan", "language": "markdown", "content_preview": "## Plan", "file_path": "/docs/plan.md", "url": "", "significance": "Plan.", "confidence": 0.9},
+            {"name": "Low conf doc", "type": "document", "language": "markdown", "content_preview": "x", "file_path": "/docs/x.md", "url": "", "significance": "x", "confidence": 0.3},
+        ])
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+
+        result = await mining_engine.extract_artifacts(sample_transcript)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "API Plan"
+        assert result[0]["type"] == "plan"
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +434,7 @@ class TestMineTranscript:
             "project": [{"name": "auth", "description": "Auth system", "status": "active", "confidence": 0.9}],
             "task": [{"title": "Add tests", "description": "Write unit tests", "status": "todo", "priority": "high", "confidence": 0.85}],
             "status": {"overall_status": "in_progress", "confidence": 0.8, "reasoning": "Active work", "phase": "implementation", "blockers": []},
-            "artifact": [{"name": "auth.py", "type": "source_code", "language": "python", "content_preview": "class Auth:", "file_path": "/auth.py", "confidence": 0.9}],
+            "artifact": [{"name": "Auth Design Doc", "type": "document", "language": "markdown", "content_preview": "## Auth design", "file_path": "/docs/auth.md", "url": "", "significance": "Design document.", "confidence": 0.9}],
             "missing": ["Tests not written"],
         }
 

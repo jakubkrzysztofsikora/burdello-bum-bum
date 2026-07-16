@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field, field_validator
 
 
 # ===========================================================================
@@ -313,9 +313,38 @@ class TaskListResponse(BaseModel):
     items: list[TaskResponse]
 
 
+class TaskBatchStatusUpdate(BaseModel):
+    """Request body for batch task status updates."""
+
+    task_ids: list[uuid.UUID]
+    status: str
+
+
+class TaskBatchResult(BaseModel):
+    """Result of a batch task operation."""
+
+    updated: int
+    task_ids: list[uuid.UUID]
+
+
 # ===========================================================================
 # Artifact Schemas
 # ===========================================================================
+
+# High-level deliverables only. Routine source files, tests, configs and
+# one-off snippets should be excluded from artifact extraction.
+ARTIFACT_TYPES = (
+    "research",
+    "plan",
+    "html",
+    "deck",
+    "document",
+    "link",
+    "report",
+    "diagram",
+    "spec",
+    "finding",
+)
 
 
 class ArtifactCreate(BaseModel):
@@ -330,6 +359,17 @@ class ArtifactCreate(BaseModel):
     tags: list[str] | None = Field(default_factory=list)
     pinned: bool | None = False
     metadata: dict[str, Any] | None = Field(default_factory=dict)
+
+    @field_validator("artifact_type")
+    @classmethod
+    def _validate_artifact_type(cls, value: str) -> str:
+        """Only accept high-level artifact types."""
+        normalized = value.lower().strip()
+        if normalized not in ARTIFACT_TYPES:
+            raise ValueError(
+                f"artifact_type must be one of {ARTIFACT_TYPES}, got {value!r}"
+            )
+        return normalized
 
 
 class ArtifactResponse(BaseModel):

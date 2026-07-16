@@ -1,7 +1,21 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Layers, FileCode } from "lucide-react";
+import { Layers, FileCode, Link2 } from "lucide-react";
 import { useArtifacts } from "../hooks/useApi";
+
+const ARTIFACT_TYPE_OPTIONS = [
+  { value: "", label: "All types" },
+  { value: "research", label: "Research" },
+  { value: "plan", label: "Plan" },
+  { value: "html", label: "HTML" },
+  { value: "deck", label: "Deck" },
+  { value: "document", label: "Document" },
+  { value: "link", label: "Link" },
+  { value: "report", label: "Report" },
+  { value: "diagram", label: "Diagram" },
+  { value: "spec", label: "Spec" },
+  { value: "finding", label: "Finding" },
+];
 
 export function Artifacts() {
   const [page, setPage] = useState(1);
@@ -26,15 +40,20 @@ export function Artifacts() {
           <h1 className="text-2xl font-bold">Artifacts</h1>
           <span className="text-sm text-bb-muted">({total})</span>
         </div>
-        <input
+        <select
           value={type}
           onChange={(e) => {
             setType(e.target.value);
             setPage(1);
           }}
-          placeholder="Filter by type (e.g. file, code)…"
           className="rounded-md border border-bb-border bg-bb-surface px-3 py-1.5 text-sm"
-        />
+        >
+          {ARTIFACT_TYPE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {isLoading ? (
@@ -48,14 +67,22 @@ export function Artifacts() {
             const filePath = (content.file_path as string) || "";
             const preview = (content.content_preview as string) || "";
             const language = (content.language as string) || "";
+            const url = (content.url as string) || "";
+            const isLink = a.artifact_type === "link" && url;
             return (
               <Link
                 key={a.id}
-                to={`/artifacts/${a.id}`}
+                to={isLink ? url : `/artifacts/${a.id}`}
+                target={isLink ? "_blank" : undefined}
+                rel={isLink ? "noopener noreferrer" : undefined}
                 className="block rounded-lg border border-bb-border bg-bb-surface p-3 transition hover:border-bb-accent/50"
               >
                 <div className="mb-1 flex items-center gap-2">
-                  <FileCode size={14} className="shrink-0 text-bb-accent" />
+                  {isLink ? (
+                    <Link2 size={14} className="shrink-0 text-bb-accent" />
+                  ) : (
+                    <FileCode size={14} className="shrink-0 text-bb-accent" />
+                  )}
                   <span className="truncate text-sm font-medium">{a.name}</span>
                 </div>
                 <div className="mb-2 flex flex-wrap gap-1.5 text-xs text-bb-muted">

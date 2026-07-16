@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.core.config import get_settings
+from backend.core.schemas import ARTIFACT_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -154,14 +155,15 @@ class MiningEngine:
         }
 
     async def extract_artifacts(self, transcript_text: str) -> list[dict[str, Any]]:
-        """Identify code artifacts created or modified in the transcript.
+        """Identify high-level deliverables created or discussed in the transcript.
 
         Args:
             transcript_text: Full transcript text to analyse.
 
         Returns:
-            List of artifact dicts with ``name``, ``type``, ``language``,
-            ``content_preview``, ``file_path``, and ``confidence`` keys.
+            List of curated artifact dicts with ``name``, ``type``, ``language``,
+            ``content_preview``, ``file_path``, ``url``, ``significance``,
+            and ``confidence`` keys.
         """
         prompt = self._load_prompt("artifact_extraction").format(
             transcript_text=transcript_text[:8000]
@@ -176,13 +178,55 @@ class MiningEngine:
                     "language": {"type": "string"},
                     "content_preview": {"type": "string"},
                     "file_path": {"type": "string"},
+                    "url": {"type": "string"},
+                    "significance": {"type": "string"},
                     "confidence": {"type": "number"},
                 },
-                "required": ["name", "type", "language", "content_preview", "file_path", "confidence"],
+                "required": ["name", "type", "language", "content_preview", "file_path", "url", "significance", "confidence"],
             },
         }
         result = await self._call_llm(prompt, response_schema=response_schema)
-        return result if isinstance(result, list) else []
+        if not isinstance(result, list):
+            return []
+
+        return self._filter_artifacts(result)
+
+    def _filter_artifacts(self, artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Drop routine/low-confidence artifacts and normalise types.
+
+        Args:
+            artifacts: Raw artifacts from the LLM.
+
+        Returns:
+            Curated list of high-level artifact dicts.
+        """
+        curated: list[dict[str, Any]] = []
+        for art in artifacts:
+            if not isinstance(art, dict):
+                continue
+            confidence = float(art.get("confidence") or 0.0)
+            if confidence < 0.6:
+                continue
+
+            raw_type = str(art.get("type", "")).lower().strip()
+            if raw_type not in ARTIFACT_TYPES:
+                continue
+
+            name = str(art.get("name", "")).strip()
+            if not name:
+                continue
+
+            # Normalise link artifacts: file_path should contain the URL.
+            url = str(art.get("url", "")).strip()
+            if raw_type == "link" and not url:
+                continue
+            if raw_type == "link":
+                art["file_path"] = url
+
+            art["type"] = raw_type
+            curated.append(art)
+
+        return curated
 
     async def find_missing_elements(self, transcript_text: str) -> list[str]:
         """Find incomplete work items in the transcript.

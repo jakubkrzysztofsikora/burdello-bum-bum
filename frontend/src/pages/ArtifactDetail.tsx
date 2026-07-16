@@ -1,5 +1,5 @@
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, FileCode } from "lucide-react";
+import { ArrowLeft, FileCode, Link2, ExternalLink } from "lucide-react";
 import { useArtifact } from "../hooks/useApi";
 
 export function ArtifactDetail() {
@@ -18,6 +18,9 @@ export function ArtifactDetail() {
   const filePath = (content.file_path as string) || "";
   const language = (content.language as string) || "";
   const preview = (content.content_preview as string) || "";
+  const url = (content.url as string) || "";
+  const significance = (content.significance as string) || "";
+  const isLink = artifact.artifact_type === "link" && url;
 
   return (
     <div className="space-y-4">
@@ -29,7 +32,11 @@ export function ArtifactDetail() {
       </Link>
 
       <div className="flex items-center gap-2">
-        <FileCode size={20} className="shrink-0 text-bb-accent" />
+        {isLink ? (
+          <Link2 size={20} className="shrink-0 text-bb-accent" />
+        ) : (
+          <FileCode size={20} className="shrink-0 text-bb-accent" />
+        )}
         <h1 className="text-xl font-bold">{artifact.name}</h1>
       </div>
 
@@ -58,9 +65,22 @@ export function ArtifactDetail() {
         )}
       </div>
 
-      {filePath && (
-        <div className="font-mono text-xs text-bb-muted">{filePath}</div>
+      {significance && (
+        <p className="text-sm text-bb-muted">{significance}</p>
       )}
+
+      {isLink ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-md bg-bb-accent/20 px-3 py-1.5 text-xs font-medium text-bb-accent transition hover:bg-bb-accent/30"
+        >
+          Open link <ExternalLink size={12} />
+        </a>
+      ) : filePath ? (
+        <div className="font-mono text-xs text-bb-muted">{filePath}</div>
+      ) : null}
 
       <div>
         <h2 className="mb-2 text-sm font-medium text-bb-muted">Content</h2>
