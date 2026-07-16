@@ -361,6 +361,29 @@ class MiningEngine:
         )
         return results
 
+    async def generate_weekly_summary(self, context_json: str) -> str:
+        """Generate a narrative weekly summary from structured project data.
+
+        Args:
+            context_json: JSON string containing projects, tasks, artifacts,
+                and transcripts from the last 7 days.
+
+        Returns:
+            Generated summary text.
+        """
+        prompt = self._load_prompt("weekly_summary").format(context_json=context_json)
+        response_schema = {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+            },
+            "required": ["summary"],
+        }
+        result = await self._call_llm(prompt, response_schema=response_schema)
+        if isinstance(result, dict) and "summary" in result:
+            return str(result["summary"]).strip()
+        return "No summary available."
+
     def _load_prompt(self, template_name: str) -> str:
         """Load a prompt template from the prompts directory.
 

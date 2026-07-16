@@ -1,0 +1,15 @@
+You are a project intelligence assistant. Write a concise weekly status summary for the user based on the project data below from the last 7 days.
+
+Cover, in plain language:
+- What was completed (tasks done, artifacts delivered, transcripts processed)
+- What is actively in progress
+- What is clearly unfinished and has not been picked up this week
+- Any notable patterns, blockers, or wins
+
+Keep the summary concise (3-6 paragraphs). Group related work by project when possible. If there is nothing to report, say so briefly.
+
+Data:
+{context_json}
+
+Return ONLY a JSON object in this exact format:
+{{"summary": "your narrative summary here"}}

@@ -6,6 +6,7 @@ including trends, breakdowns, and time-series data.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -100,89 +101,50 @@ async def get_detailed_stats(db: AsyncSession = Depends(get_db)) -> dict[str, An
 async def get_weekly_summary(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Get a 'last week' summary for the dashboard.
-
-    Buckets:
-    - done: tasks marked done and updated in the last 7 days, plus artifacts
-      created in the last 7 days.
-    - in_progress: tasks currently in_progress and updated in the last 7 days.
-    - stale: tasks still todo/in_progress but not touched in the last 7 days.
+    """Get an LLM-generated narrative summary of the last 7 days.
 
     Args:
         db: Async database session.
 
     Returns:
-        Dict with counts and top items for each bucket.
+        Dict with a single ``summary`` key containing the generated text.
     """
+    from backend.mining.engine import MiningEngine
+
     week_ago = datetime.utcnow() - timedelta(days=7)
 
-    # Project name map for display.
+    # Project name map.
     project_result = await db.execute(select(Project.id, Project.name))
     project_names: dict[Any, str] = {r.id: r.name for r in project_result.all()}
 
-    # Done this week (tasks moved/completed to done + new artifacts).
+    # Projects with recent activity.
+    active_project_ids = set()
+
+    # Done this week.
     done_tasks_result = await db.execute(
         select(Task)
         .where(Task.status == "done", Task.updated_at >= week_ago)
         .order_by(Task.updated_at.desc())
-        .limit(10)
+        .limit(25)
     )
     done_tasks = list(done_tasks_result.scalars().all())
-
-    recent_artifacts_result = await db.execute(
-        select(Artifact)
-        .where(Artifact.created_at >= week_ago)
-        .order_by(Artifact.created_at.desc())
-        .limit(10)
-    )
-    recent_artifacts = list(recent_artifacts_result.scalars().all())
-
-    done_items = [
-        {
-            "id": str(t.id),
-            "kind": "task",
-            "title": t.title,
-            "project_id": str(t.project_id) if t.project_id else None,
-            "project_name": project_names.get(t.project_id),
-            "status": t.status,
-            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-        }
-        for t in done_tasks
-    ] + [
-        {
-            "id": str(a.id),
-            "kind": "artifact",
-            "title": a.name,
-            "project_id": str(a.project_id) if a.project_id else None,
-            "project_name": project_names.get(a.project_id),
-            "artifact_type": a.artifact_type,
-            "updated_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in recent_artifacts
-    ]
+    for t in done_tasks:
+        if t.project_id:
+            active_project_ids.add(t.project_id)
 
     # In progress this week.
     in_progress_result = await db.execute(
         select(Task)
         .where(Task.status == "in_progress", Task.updated_at >= week_ago)
         .order_by(Task.updated_at.desc())
-        .limit(10)
+        .limit(25)
     )
     in_progress_tasks = list(in_progress_result.scalars().all())
-    in_progress_items = [
-        {
-            "id": str(t.id),
-            "kind": "task",
-            "title": t.title,
-            "project_id": str(t.project_id) if t.project_id else None,
-            "project_name": project_names.get(t.project_id),
-            "status": t.status,
-            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-        }
-        for t in in_progress_tasks
-    ]
+    for t in in_progress_tasks:
+        if t.project_id:
+            active_project_ids.add(t.project_id)
 
-    # Stale: todo or in_progress but not updated this week.
+    # Stale work (not touched this week).
     stale_result = await db.execute(
         select(Task)
         .where(
@@ -190,28 +152,100 @@ async def get_weekly_summary(
             Task.updated_at < week_ago,
         )
         .order_by(Task.updated_at.asc())
-        .limit(10)
+        .limit(25)
     )
     stale_tasks = list(stale_result.scalars().all())
-    stale_items = [
-        {
-            "id": str(t.id),
-            "kind": "task",
-            "title": t.title,
-            "project_id": str(t.project_id) if t.project_id else None,
-            "project_name": project_names.get(t.project_id),
-            "status": t.status,
-            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-        }
-        for t in stale_tasks
-    ]
+    for t in stale_tasks:
+        if t.project_id:
+            active_project_ids.add(t.project_id)
 
-    return {
+    # New artifacts this week.
+    artifacts_result = await db.execute(
+        select(Artifact)
+        .where(Artifact.created_at >= week_ago)
+        .order_by(Artifact.created_at.desc())
+        .limit(25)
+    )
+    recent_artifacts = list(artifacts_result.scalars().all())
+    for a in recent_artifacts:
+        if a.project_id:
+            active_project_ids.add(a.project_id)
+
+    # Recent transcripts (titles only, to keep prompt compact).
+    transcripts_result = await db.execute(
+        select(Transcript)
+        .where(Transcript.created_at >= week_ago)
+        .order_by(Transcript.created_at.desc())
+        .limit(25)
+    )
+    recent_transcripts = list(transcripts_result.scalars().all())
+    for tr in recent_transcripts:
+        project_name = (tr.metadata_ or {}).get("project_name")
+        if project_name:
+            # Best-effort reverse lookup; not strictly required.
+            pass
+
+    context = {
         "since": week_ago.isoformat(),
-        "done": {"count": len(done_items), "items": done_items},
-        "in_progress": {"count": len(in_progress_items), "items": in_progress_items},
-        "stale": {"count": len(stale_items), "items": stale_items},
+        "projects": [
+            {
+                "id": str(p.id),
+                "name": p.name,
+                "status": p.status,
+            }
+            for p in (await db.execute(select(Project).where(Project.id.in_(active_project_ids)))).scalars().all()
+        ]
+        if active_project_ids
+        else [],
+        "done_tasks": [
+            {
+                "title": t.title,
+                "project": project_names.get(t.project_id),
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+            }
+            for t in done_tasks
+        ],
+        "in_progress_tasks": [
+            {
+                "title": t.title,
+                "project": project_names.get(t.project_id),
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+            }
+            for t in in_progress_tasks
+        ],
+        "stale_tasks": [
+            {
+                "title": t.title,
+                "project": project_names.get(t.project_id),
+                "status": t.status,
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+            }
+            for t in stale_tasks
+        ],
+        "new_artifacts": [
+            {
+                "name": a.name,
+                "type": a.artifact_type,
+                "project": project_names.get(a.project_id),
+                "significance": (a.content or {}).get("significance"),
+            }
+            for a in recent_artifacts
+        ],
+        "recent_transcripts": [
+            {
+                "title": tr.title,
+                "status": tr.status,
+                "created_at": tr.created_at.isoformat() if tr.created_at else None,
+                "project_name": (tr.metadata_ or {}).get("project_name"),
+            }
+            for tr in recent_transcripts
+        ],
     }
+
+    engine = MiningEngine()
+    summary = await engine.generate_weekly_summary(json.dumps(context, default=str))
+
+    return {"summary": summary}
 
 
 @router.get("/resolver")

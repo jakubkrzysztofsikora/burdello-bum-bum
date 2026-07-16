@@ -113,27 +113,8 @@ export interface Stats {
   status_breakdown: Record<string, number>;
 }
 
-export interface WeeklySummaryItem {
-  id: string;
-  kind: "task" | "artifact";
-  title: string;
-  project_id: string | null;
-  project_name: string | null;
-  status?: string;
-  artifact_type?: string;
-  updated_at: string | null;
-}
-
-export interface WeeklySummaryBucket {
-  count: number;
-  items: WeeklySummaryItem[];
-}
-
 export interface WeeklySummary {
-  since: string;
-  done: WeeklySummaryBucket;
-  in_progress: WeeklySummaryBucket;
-  stale: WeeklySummaryBucket;
+  summary: string;
 }
 
 export interface SkillInfo {
