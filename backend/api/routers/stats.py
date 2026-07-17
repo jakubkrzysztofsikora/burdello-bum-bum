@@ -101,7 +101,7 @@ async def get_detailed_stats(db: AsyncSession = Depends(get_db)) -> dict[str, An
 async def get_weekly_summary(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Get an LLM-generated narrative summary of the last 7 days.
+    """Get an LLM-generated narrative summary of recent and at-risk work.
 
     Args:
         db: Async database session.
@@ -111,135 +111,118 @@ async def get_weekly_summary(
     """
     from backend.mining.engine import MiningEngine
 
-    week_ago = datetime.utcnow() - timedelta(days=7)
-
     # Project name map.
     project_result = await db.execute(select(Project.id, Project.name))
     project_names: dict[Any, str] = {r.id: r.name for r in project_result.all()}
 
-    # Projects with recent activity.
-    active_project_ids = set()
+    # Load all tasks, artifacts, and transcripts for project-level aggregation.
+    # Personal-scale data; revisit if this becomes a bottleneck.
+    all_tasks = (await db.execute(select(Task))).scalars().all()
+    all_artifacts = (await db.execute(select(Artifact))).scalars().all()
+    all_transcripts = (await db.execute(select(Transcript))).scalars().all()
 
-    # Done this week.
-    done_tasks_result = await db.execute(
-        select(Task)
-        .where(Task.status == "done", Task.updated_at >= week_ago)
-        .order_by(Task.updated_at.desc())
-        .limit(25)
-    )
-    done_tasks = list(done_tasks_result.scalars().all())
-    for t in done_tasks:
-        if t.project_id:
-            active_project_ids.add(t.project_id)
+    tasks_by_project: dict[Any, list[Task]] = {}
+    for t in all_tasks:
+        tasks_by_project.setdefault(t.project_id, []).append(t)
 
-    # In progress this week.
-    in_progress_result = await db.execute(
-        select(Task)
-        .where(Task.status == "in_progress", Task.updated_at >= week_ago)
-        .order_by(Task.updated_at.desc())
-        .limit(25)
-    )
-    in_progress_tasks = list(in_progress_result.scalars().all())
-    for t in in_progress_tasks:
-        if t.project_id:
-            active_project_ids.add(t.project_id)
+    artifacts_by_project: dict[Any, list[Artifact]] = {}
+    for a in all_artifacts:
+        artifacts_by_project.setdefault(a.project_id, []).append(a)
 
-    # Stale work (not touched this week).
-    stale_result = await db.execute(
-        select(Task)
-        .where(
-            Task.status.in_(["todo", "in_progress"]),
-            Task.updated_at < week_ago,
-        )
-        .order_by(Task.updated_at.asc())
-        .limit(25)
-    )
-    stale_tasks = list(stale_result.scalars().all())
-    for t in stale_tasks:
-        if t.project_id:
-            active_project_ids.add(t.project_id)
-
-    # New artifacts this week.
-    artifacts_result = await db.execute(
-        select(Artifact)
-        .where(Artifact.created_at >= week_ago)
-        .order_by(Artifact.created_at.desc())
-        .limit(25)
-    )
-    recent_artifacts = list(artifacts_result.scalars().all())
-    for a in recent_artifacts:
-        if a.project_id:
-            active_project_ids.add(a.project_id)
-
-    # Recent transcripts (titles only, to keep prompt compact).
-    transcripts_result = await db.execute(
-        select(Transcript)
-        .where(Transcript.created_at >= week_ago)
-        .order_by(Transcript.created_at.desc())
-        .limit(25)
-    )
-    recent_transcripts = list(transcripts_result.scalars().all())
-    for tr in recent_transcripts:
+    transcripts_by_project: dict[Any, list[Transcript]] = {}
+    for tr in all_transcripts:
         project_name = (tr.metadata_ or {}).get("project_name")
         if project_name:
-            # Best-effort reverse lookup; not strictly required.
-            pass
+            for pid, name in project_names.items():
+                if name == project_name:
+                    transcripts_by_project.setdefault(pid, []).append(tr)
+                    break
+
+    # Build per-project activity snapshots.
+    project_snapshots = []
+    projects = (await db.execute(select(Project))).scalars().all()
+    for p in projects:
+        tasks = tasks_by_project.get(p.id, [])
+        artifacts = artifacts_by_project.get(p.id, [])
+        transcripts = transcripts_by_project.get(p.id, [])
+
+        last_task_update = max(
+            (t.updated_at for t in tasks if t.updated_at), default=None
+        )
+        last_artifact = max(
+            (a.created_at for a in artifacts if a.created_at), default=None
+        )
+        last_transcript = max(
+            (tr.created_at for tr in transcripts if tr.created_at), default=None
+        )
+        last_activity = max(
+            [p.updated_at, last_task_update, last_artifact, last_transcript],
+            default=None,
+        )
+
+        todo_tasks = [t for t in tasks if t.status == "todo"]
+        in_progress_tasks = [t for t in tasks if t.status == "in_progress"]
+        done_tasks = [t for t in tasks if t.status == "done"]
+        cancelled_tasks = [t for t in tasks if t.status == "cancelled"]
+
+        # Skip projects with no activity and no work items.
+        if not tasks and not artifacts and not transcripts:
+            continue
+
+        project_snapshots.append({
+            "name": p.name,
+            "status": p.status,
+            "last_activity": last_activity.isoformat() if last_activity else None,
+            "task_counts": {
+                "todo": len(todo_tasks),
+                "in_progress": len(in_progress_tasks),
+                "done": len(done_tasks),
+                "cancelled": len(cancelled_tasks),
+            },
+            "unfinished_tasks": [
+                {
+                    "title": t.title,
+                    "status": t.status,
+                    "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+                }
+                for t in sorted(
+                    todo_tasks + in_progress_tasks,
+                    key=lambda x: x.updated_at or datetime.min,
+                )[:10]
+            ],
+            "recent_artifacts": [
+                {"name": a.name, "type": a.artifact_type}
+                for a in sorted(
+                    artifacts,
+                    key=lambda x: x.created_at or datetime.min,
+                    reverse=True,
+                )[:5]
+            ],
+            "recent_transcripts": [
+                {"title": tr.title, "status": tr.status}
+                for tr in sorted(
+                    transcripts,
+                    key=lambda x: x.created_at or datetime.min,
+                    reverse=True,
+                )[:5]
+            ],
+        })
+
+    # Sort by last activity, most recent first.
+    project_snapshots.sort(
+        key=lambda x: (x["last_activity"] or "",),
+        reverse=True,
+    )
 
     context = {
-        "since": week_ago.isoformat(),
-        "projects": [
-            {
-                "id": str(p.id),
-                "name": p.name,
-                "status": p.status,
-            }
-            for p in (await db.execute(select(Project).where(Project.id.in_(active_project_ids)))).scalars().all()
-        ]
-        if active_project_ids
-        else [],
-        "done_tasks": [
-            {
-                "title": t.title,
-                "project": project_names.get(t.project_id),
-                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-            }
-            for t in done_tasks
-        ],
-        "in_progress_tasks": [
-            {
-                "title": t.title,
-                "project": project_names.get(t.project_id),
-                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-            }
-            for t in in_progress_tasks
-        ],
-        "stale_tasks": [
-            {
-                "title": t.title,
-                "project": project_names.get(t.project_id),
-                "status": t.status,
-                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-            }
-            for t in stale_tasks
-        ],
-        "new_artifacts": [
-            {
-                "name": a.name,
-                "type": a.artifact_type,
-                "project": project_names.get(a.project_id),
-                "significance": (a.content or {}).get("significance"),
-            }
-            for a in recent_artifacts
-        ],
-        "recent_transcripts": [
-            {
-                "title": tr.title,
-                "status": tr.status,
-                "created_at": tr.created_at.isoformat() if tr.created_at else None,
-                "project_name": (tr.metadata_ or {}).get("project_name"),
-            }
-            for tr in recent_transcripts
-        ],
+        "report_date": datetime.utcnow().isoformat(),
+        "lookback_days": 30,
+        "total_projects": len(projects),
+        "total_incomplete_tasks": sum(
+            p["task_counts"]["todo"] + p["task_counts"]["in_progress"]
+            for p in project_snapshots
+        ),
+        "projects": project_snapshots[:30],
     }
 
     engine = MiningEngine()

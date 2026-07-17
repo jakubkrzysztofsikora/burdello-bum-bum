@@ -23,6 +23,7 @@ DEFAULT_PROVIDER_PATTERNS: dict[str, str] = {
     "vibe": "**/.vibe/logs/session/*.json",
     "agy": "**/.gemini/antigravity-cli/**/*.jsonl",
     "aider": "**/.aider.chat.history.md",
+    "openclaw": "**/.openclaw*/agents/main/sessions/*.jsonl",
 }
 
 

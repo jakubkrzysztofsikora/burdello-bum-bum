@@ -40,6 +40,7 @@ _CLAUDE_RE = re.compile(r"/\.claude/projects/-(?P<encoded>[^/]+)(?:/|$)")
 _GEMINI_RE = re.compile(r"/\.gemini/antigravity-cli/")
 _KIMI_RE = re.compile(r"/\.kimi/sessions/")
 _CODEX_RE = re.compile(r"/\.codex/sessions/")
+_OPENCLAW_RE = re.compile(r"/\.openclaw[^/]*/agents/main/sessions/")
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +248,8 @@ def resolve_from_path(file_path: str) -> RepoIdentity | None:
         return _synthetic("unsorted-kimi", "kimi")
     if _CODEX_RE.search(file_path):
         return _synthetic("unsorted-codex", "codex")
+    if _OPENCLAW_RE.search(file_path):
+        return _synthetic("unsorted-openclaw", "openclaw")
 
     _COUNTERS["resolver_miss"] += 1
     log.warning("repo_resolver: no provider match for %s", file_path)

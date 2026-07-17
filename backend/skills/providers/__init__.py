@@ -16,6 +16,7 @@ from backend.skills.providers.claude_code import ClaudeCodeSkill
 from backend.skills.providers.codex import CodexSkill
 from backend.skills.providers.generic import GenericSkill
 from backend.skills.providers.kimi import KimiSkill
+from backend.skills.providers.openclaw import OpenclawSkill
 from backend.skills.providers.vibe import VibeSkill
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "CodexSkill",
     "GenericSkill",
     "KimiSkill",
+    "OpenclawSkill",
     "VibeSkill",
 ]

@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"467c7305-aab8-47e8-9cc5-9aa7b8c38f75","timestamp":"2026-06-28T19:06:25.297Z","cwd":"/Users/jakubsikora/Repos/personal/burdello-bum-bum"}
+{"type":"model_change","id":"50eb3585","parentId":null,"timestamp":"2026-06-28T19:06:25.308Z","provider":"zai","modelId":"zai_auto"}
+{"type":"message","id":"29410680","parentId":"61efe37e","timestamp":"2026-06-28T19:06:25.339Z","message":{"role":"user","content":[{"type":"text","text":"Update the artifact taxonomy to only keep high-level deliverables."}]}}
+{"type":"message","id":"f723d63e","parentId":"2f6e1950","timestamp":"2026-06-28T19:06:30.284Z","message":{"role":"assistant","content":[{"type":"text","text":"I'll narrow the artifact types to research, plan, html, deck, document, link, report, diagram, spec, and finding."}]}}
+{"type":"toolCall","id":"call_00_Ir9KxXHwIrdrxFEMFGND8896","parentId":"f723d63e","timestamp":"2026-06-28T19:06:30.284Z","name":"edit","arguments":{"path":"backend/core/schemas.py"}}
+{"type":"toolResult","toolCallId":"call_00_Ir9KxXHwIrdrxFEMFGND8896","timestamp":"2026-06-28T19:06:31.284Z","content":[{"type":"text","text":"File updated."}]}

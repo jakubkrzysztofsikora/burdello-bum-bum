@@ -98,6 +98,7 @@ class SkillRegistry:
             CodexSkill,
             GenericSkill,
             KimiSkill,
+            OpenclawSkill,
             VibeSkill,
         )
 
@@ -107,6 +108,7 @@ class SkillRegistry:
         self.register(VibeSkill)
         self.register(AgySkill)
         self.register(AiderSkill)
+        self.register(OpenclawSkill)
         self.register(GenericSkill)
 
         logger.info(

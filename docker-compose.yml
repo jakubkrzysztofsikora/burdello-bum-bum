@@ -5,6 +5,7 @@ services:
   postgres:
     image: ankane/pgvector:latest
     container_name: bb-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: bbuser
       POSTGRES_PASSWORD: bbpass
@@ -29,6 +30,7 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: bb-qdrant
+    restart: unless-stopped
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -55,6 +57,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: bb-redis
+    restart: unless-stopped
     command: >
       redis-server
       --maxmemory 3gb
@@ -105,6 +108,7 @@ services:
       - ${HOME}/.kimi:/home/bbuser/.kimi:ro
       - ${HOME}/.vibe:/home/bbuser/.vibe:ro
       - ${HOME}/.gemini:/home/bbuser/.gemini:ro
+      - ${HOME}/.openclaw-autoclaw:/home/bbuser/.openclaw-autoclaw:ro
     environment:
       DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
       QDRANT_URL: "http://qdrant:6333"
@@ -162,6 +166,7 @@ services:
       - ${HOME}/.kimi:/home/bbuser/.kimi:ro
       - ${HOME}/.vibe:/home/bbuser/.vibe:ro
       - ${HOME}/.gemini:/home/bbuser/.gemini:ro
+      - ${HOME}/.openclaw-autoclaw:/home/bbuser/.openclaw-autoclaw:ro
     # The image HEALTHCHECK curls :8000 (the API); a worker doesn't serve it.
     healthcheck:
       disable: true
