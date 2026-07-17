@@ -1,5 +1,6 @@
 import { TaskCard } from "./TaskCard";
 import { useUpdateTaskStatus } from "../hooks/useApi";
+import { useAppStore } from "../stores/useAppStore";
 import type { Task } from "../api/types";
 
 interface KanbanBoardProps {
@@ -13,8 +14,17 @@ const COLUMNS: { key: Task["status"]; label: string }[] = [
   { key: "cancelled", label: "Cancelled" },
 ];
 
+function byCreatedDesc(a: Task, b: Task): number {
+  const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+  const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+  return tb - ta;
+}
+
 export function KanbanBoard({ tasks }: KanbanBoardProps) {
   const updateStatus = useUpdateTaskStatus();
+  const selectMode = useAppStore((s) => s.selectMode);
+  const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
+  const toggleTaskSelected = useAppStore((s) => s.toggleTaskSelected);
 
   const handleDragStart = (e: React.DragEvent, taskId: string) => {
     e.dataTransfer.setData("taskId", taskId);
@@ -35,7 +45,9 @@ export function KanbanBoard({ tasks }: KanbanBoardProps) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
       {COLUMNS.map((col) => {
-        const colTasks = tasks.filter((t) => t.status === col.key);
+        const colTasks = tasks
+          .filter((t) => t.status === col.key)
+          .sort(byCreatedDesc);
         return (
           <div
             key={col.key}
@@ -57,6 +69,9 @@ export function KanbanBoard({ tasks }: KanbanBoardProps) {
                   key={task.id}
                   task={task}
                   onDragStart={handleDragStart}
+                  selected={selectedTaskIds.has(task.id)}
+                  selectMode={selectMode}
+                  onToggleSelect={toggleTaskSelected}
                 />
               ))}
               {colTasks.length === 0 && (

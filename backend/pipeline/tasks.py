@@ -335,9 +335,10 @@ def normalize_task(self, extraction_result: dict[str, Any]) -> dict[str, Any]:
                     "reason": "already_exists",
                 }
 
-            # Store source
+            # Store source. Prefer the skill's source_type over the path-detected provider.
+            source_type = extracted_data.get("source_type") or provider
             size = Path(source_path).stat().st_size
-            source_id = await storage.store_source(source_path, file_hash, provider, size)
+            source_id = await storage.store_source(source_path, file_hash, source_type, size)
 
             # Build ExtractedTranscript and normalise
             from backend.skills.base import ExtractedTranscript, NormalizedMessage

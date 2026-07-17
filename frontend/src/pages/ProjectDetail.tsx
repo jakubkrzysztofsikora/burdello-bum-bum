@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, CheckSquare, FileText, Upload, List, LayoutTemplate, Bookmark } from "lucide-react";
+import { ArrowLeft, CheckSquare, FileText, Upload, List, LayoutTemplate, Bookmark, CheckCheck, X } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { StatusBadge } from "../components/StatusBadge";
 import { TaskCard } from "../components/TaskCard";
 import { TranscriptCard } from "../components/TranscriptCard";
 import { KanbanBoard } from "../components/KanbanBoard";
-import { useProject, useTasks, useTranscripts, useBookmarks } from "../hooks/useApi";
+import { useProject, useTasks, useTranscripts, useBookmarks, useBatchUpdateTaskStatus } from "../hooks/useApi";
+import { useAppStore } from "../stores/useAppStore";
 
 const COLORS = ["#3b82f6", "#f59e0b", "#22c55e", "#ef4444"];
 
@@ -16,11 +17,26 @@ export function ProjectDetail() {
   const { data: project, isLoading: projectLoading } = useProject(id || "");
   const { data: tasksData } = useTasks({ project_id: id });
   const { data: transcriptsData } = useTranscripts({ project_name: project?.name });
-  const { data: bookmarksData } = useBookmarks({ project_id: id });
+  const { data: bookmarksData } = useBookmarks({ project_id: id, limit: 500 });
 
   const tasks = tasksData?.items || [];
   const transcripts = transcriptsData?.items || [];
   const bookmarks = bookmarksData?.items || [];
+
+  const selectMode = useAppStore((s) => s.selectMode);
+  const setSelectMode = useAppStore((s) => s.setSelectMode);
+  const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
+  const toggleTaskSelected = useAppStore((s) => s.toggleTaskSelected);
+  const setSelectedTasks = useAppStore((s) => s.setSelectedTasks);
+  const clearSelectedTasks = useAppStore((s) => s.clearSelectedTasks);
+
+  const batchStatus = useBatchUpdateTaskStatus();
+
+  const actionable = tasks.filter(
+    (t) => t.status === "todo" || t.status === "in_progress",
+  );
+  const allActionableSelected =
+    actionable.length > 0 && actionable.every((t) => selectedTaskIds.has(t.id));
 
   const statusCounts = {
     todo: tasks.filter((t) => t.status === "todo").length,
@@ -32,6 +48,15 @@ export function ProjectDetail() {
   const chartData = Object.entries(statusCounts)
     .filter(([, v]) => v > 0)
     .map(([name, value]) => ({ name: name.replace("_", " "), value }));
+
+  const handleMarkSelectedDone = () => {
+    const ids = [...selectedTaskIds];
+    if (ids.length === 0) return;
+    batchStatus.mutate(
+      { taskIds: ids, status: "done" },
+      { onSuccess: () => clearSelectedTasks() },
+    );
+  };
 
   if (projectLoading || !project) {
     return (
@@ -120,29 +145,74 @@ export function ProjectDetail() {
       </div>
 
       <div>
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-lg font-semibold">
             <CheckSquare size={16} /> Tasks ({tasks.length})
           </h2>
-          <div className="flex rounded-md border border-bb-border">
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setTaskView("kanban")}
-              className={`flex items-center gap-1 rounded-l-md px-3 py-1.5 text-xs transition ${
-                taskView === "kanban" ? "bg-bb-accent/20 text-bb-accent" : "text-bb-muted hover:text-bb-text"
+              onClick={() => setSelectMode(!selectMode)}
+              className={`flex items-center gap-1.5 rounded-md border border-bb-border px-3 py-1.5 text-xs font-medium transition ${
+                selectMode
+                  ? "bg-bb-accent/20 text-bb-accent"
+                  : "text-bb-muted hover:text-bb-text"
               }`}
             >
-              <LayoutTemplate size={12} /> Kanban
+              <CheckCheck size={12} /> {selectMode ? "Exit select" : "Select"}
             </button>
-            <button
-              onClick={() => setTaskView("list")}
-              className={`flex items-center gap-1 rounded-r-md px-3 py-1.5 text-xs transition ${
-                taskView === "list" ? "bg-bb-accent/20 text-bb-accent" : "text-bb-muted hover:text-bb-text"
-              }`}
-            >
-              <List size={12} /> List
-            </button>
+            <div className="flex rounded-md border border-bb-border">
+              <button
+                onClick={() => setTaskView("kanban")}
+                className={`flex items-center gap-1 rounded-l-md px-3 py-1.5 text-xs transition ${
+                  taskView === "kanban" ? "bg-bb-accent/20 text-bb-accent" : "text-bb-muted hover:text-bb-text"
+                }`}
+              >
+                <LayoutTemplate size={12} /> Kanban
+              </button>
+              <button
+                onClick={() => setTaskView("list")}
+                className={`flex items-center gap-1 rounded-r-md px-3 py-1.5 text-xs transition ${
+                  taskView === "list" ? "bg-bb-accent/20 text-bb-accent" : "text-bb-muted hover:text-bb-text"
+                }`}
+              >
+                <List size={12} /> List
+              </button>
+            </div>
           </div>
         </div>
+
+        {selectMode && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-bb-border bg-bb-card px-3 py-2 text-xs">
+            <span className="font-medium text-bb-text">
+              {selectedTaskIds.size} selected
+            </span>
+            <button
+              onClick={() =>
+                allActionableSelected
+                  ? clearSelectedTasks()
+                  : setSelectedTasks(actionable.map((t) => t.id))
+              }
+              className="rounded border border-bb-border px-2 py-1 text-bb-muted transition hover:text-bb-text"
+            >
+              {allActionableSelected ? "Clear todo+in-progress" : "Select todo+in-progress"}
+            </button>
+            <div className="flex-1" />
+            <button
+              onClick={handleMarkSelectedDone}
+              disabled={selectedTaskIds.size === 0 || batchStatus.isPending}
+              className="flex items-center gap-1.5 rounded-md bg-bb-success/20 px-3 py-1.5 font-medium text-bb-success transition hover:bg-bb-success/30 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <CheckCheck size={12} /> {batchStatus.isPending ? "Marking…" : "Mark done"}
+            </button>
+            <button
+              onClick={clearSelectedTasks}
+              className="rounded p-1 text-bb-muted transition hover:text-bb-text"
+              title="Clear selection"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {taskView === "kanban" ? (
           <KanbanBoard tasks={tasks} />
@@ -151,7 +221,15 @@ export function ProjectDetail() {
             {tasks.length === 0 ? (
               <div className="py-4 text-center text-xs text-bb-muted">No tasks</div>
             ) : (
-              tasks.map((t) => <TaskCard key={t.id} task={t} />)
+              tasks.map((t) => (
+                <TaskCard
+                  key={t.id}
+                  task={t}
+                  selected={selectedTaskIds.has(t.id)}
+                  selectMode={selectMode}
+                  onToggleSelect={toggleTaskSelected}
+                />
+              ))
             )}
           </div>
         )}
@@ -172,7 +250,7 @@ export function ProjectDetail() {
 
       <div>
         <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-          <Bookmark size={16} /> Bookmarks ({bookmarks.length})
+          <Bookmark size={16} /> Bookmarks ({bookmarksData?.total ?? bookmarks.length})
         </h2>
         <div className="space-y-2">
           {bookmarks.length === 0 ? (
@@ -181,13 +259,26 @@ export function ProjectDetail() {
             bookmarks.map((b) => (
               <div
                 key={b.id}
-                className="rounded-lg border border-bb-border bg-bb-card p-4"
+                className={`rounded-lg border border-bb-border bg-bb-card p-4 ${
+                  b.pinned ? "ring-1 ring-bb-accent/40" : ""
+                }`}
               >
-                <p className="text-sm">{b.note_text}</p>
+                <p className="text-sm">
+                  {b.pinned && (
+                    <Bookmark size={12} className="mr-1 inline text-bb-accent" />
+                  )}
+                  {b.note_text}
+                </p>
                 <div className="mt-2 flex items-center gap-2 text-xs text-bb-muted">
                   <span>{b.author || "agent"}</span>
                   <span>·</span>
                   <span>{new Date(b.created_at).toLocaleString()}</span>
+                  {b.tags && b.tags.length > 0 && (
+                    <>
+                      <span>·</span>
+                      <span>{b.tags.join(", ")}</span>
+                    </>
+                  )}
                   <span className="flex-1" />
                   {b.transcript_id ? (
                     <Link

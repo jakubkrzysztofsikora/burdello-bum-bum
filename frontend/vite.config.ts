@@ -7,7 +7,7 @@ import react from "@vitejs/plugin-react";
 const apiTarget = process.env.VITE_API_PROXY || "http://localhost:8000";
 
 export default defineConfig({
-  base: "/burdello/",
+  base: "/",
   plugins: [react()],
   server: {
     host: true,
@@ -15,6 +15,7 @@ export default defineConfig({
     allowedHosts: [
       "localhost",
       "mac-studio-jakub.tail5d39b4.ts.net",
+      "burdello.tail5d39b4.ts.net",
     ],
     proxy: {
       // Keep the browser's Host header (changeOrigin: false) so FastAPI's

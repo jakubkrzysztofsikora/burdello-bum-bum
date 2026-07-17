@@ -10,12 +10,19 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.database import get_db
 from backend.core.models import Project, Task
-from backend.core.schemas import TaskCreate, TaskListResponse, TaskResponse, TaskSummary
+from backend.core.schemas import (
+    TaskBatchResult,
+    TaskBatchStatusUpdate,
+    TaskCreate,
+    TaskListResponse,
+    TaskResponse,
+    TaskSummary,
+)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -147,6 +154,44 @@ async def get_kanban_board(
             columns["abandoned"].append(task_summary)
 
     return columns
+
+
+@router.post("/batch/status", response_model=TaskBatchResult)
+async def batch_update_task_status(
+    payload: TaskBatchStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Set the status of many tasks in a single UPDATE.
+
+    Args:
+        payload: ``{task_ids: [...], status: "..."}``.
+        db: Async database session.
+
+    Returns:
+        ``{updated: <int>, task_ids: [...]}`` (only IDs that existed).
+
+    Raises:
+        HTTPException: 422 for an invalid status or empty id list.
+    """
+    if not payload.task_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="task_ids must not be empty",
+        )
+    if payload.status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid status: {payload.status}. Must be one of: {', '.join(sorted(VALID_STATUSES))}",
+        )
+
+    result = await db.execute(
+        update(Task)
+        .where(Task.id.in_(payload.task_ids))
+        .values(status=payload.status)
+    )
+    await db.commit()
+
+    return {"updated": result.rowcount or 0, "task_ids": list(payload.task_ids)}
 
 
 @router.get("/{task_id}", response_model=TaskResponse)

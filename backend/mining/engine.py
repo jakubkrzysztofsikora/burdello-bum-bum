@@ -361,12 +361,17 @@ class MiningEngine:
         )
         return results
 
-    async def generate_weekly_summary(self, context_json: str) -> str:
+    async def generate_weekly_summary(
+        self,
+        context_json: str,
+        timeout: float | None = None,
+    ) -> str:
         """Generate a narrative weekly summary from structured project data.
 
         Args:
             context_json: JSON string containing projects, tasks, artifacts,
                 and transcripts from the last 7 days.
+            timeout: Optional request timeout in seconds.
 
         Returns:
             Generated summary text.
@@ -379,7 +384,9 @@ class MiningEngine:
             },
             "required": ["summary"],
         }
-        result = await self._call_llm(prompt, response_schema=response_schema)
+        result = await self._call_llm(
+            prompt, response_schema=response_schema, timeout=timeout
+        )
         if isinstance(result, dict) and "summary" in result:
             return str(result["summary"]).strip()
         return "No summary available."
@@ -404,12 +411,14 @@ class MiningEngine:
         self,
         prompt: str,
         response_schema: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> Any:
         """Call the LLM via LiteLLM with optional JSON response format.
 
         Args:
             prompt: The complete prompt text.
             response_schema: Optional JSON schema to request structured output.
+            timeout: Optional request timeout in seconds.
 
         Returns:
             Parsed JSON response from the LLM.
@@ -431,6 +440,10 @@ class MiningEngine:
             "temperature": 0.1,
             "max_tokens": 4000,
         }
+
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+            kwargs["num_retries"] = 0
 
         if response_schema is not None:
             kwargs["response_format"] = {"type": "json_object"}

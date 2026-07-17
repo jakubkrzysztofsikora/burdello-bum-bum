@@ -20,6 +20,14 @@ interface AppState {
   // Search
   lastQuery: string;
   setLastQuery: (q: string) => void;
+
+  // Task multi-select (project view batch actions)
+  selectMode: boolean;
+  setSelectMode: (on: boolean) => void;
+  selectedTaskIds: Set<string>;
+  toggleTaskSelected: (id: string) => void;
+  setSelectedTasks: (ids: string[]) => void;
+  clearSelectedTasks: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -43,4 +51,19 @@ export const useAppStore = create<AppState>((set) => ({
 
   lastQuery: "",
   setLastQuery: (q) => set({ lastQuery: q }),
+
+  selectMode: false,
+  setSelectMode: (on) =>
+    set(on ? { selectMode: true } : { selectMode: false, selectedTaskIds: new Set<string>() }),
+  selectedTaskIds: new Set<string>(),
+  toggleTaskSelected: (id) =>
+    set((s) => {
+      const next = new Set(s.selectedTaskIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { selectedTaskIds: next };
+    }),
+  setSelectedTasks: (ids) => set({ selectedTaskIds: new Set(ids) }),
+  clearSelectedTasks: () =>
+    set({ selectedTaskIds: new Set<string>() }),
 }));
