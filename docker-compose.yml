@@ -60,9 +60,10 @@ services:
     restart: unless-stopped
     command: >
       redis-server
-      --maxmemory 3gb
+      --maxmemory 0
       --maxmemory-policy noeviction
       --save ""
+      --activedefrag yes
     ports:
       - "6380:6379"
     volumes:
@@ -75,10 +76,12 @@ services:
     deploy:
       resources:
         limits:
-          # Headroom above the 3gb maxmemory; Redis is the Celery broker +
-          # result backend, so it must not evict (noeviction) under load.
-          # At ~5 result-meta keys per transcript chain, a full re-ingest of
-          # ~5k transcripts overflows a smaller cap mid-dispatch.
+          # Redis is the Celery broker + result backend: maxmemory 0 +
+          # noeviction. A fixed maxmemory cap is unsafe here — jemalloc
+          # fragmentation on aarch64/OrbStack reports used_memory 5-6x
+          # above RSS, so a 3gb cap rejected writes at 551MB real RSS,
+          # wedging every worker. The container cgroup limit is the real
+          # ceiling; activedefrag keeps the allocator honest.
           memory: 4g
     networks:
       - bb-network
