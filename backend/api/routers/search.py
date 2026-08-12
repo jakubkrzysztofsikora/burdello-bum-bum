@@ -6,6 +6,7 @@ suggestions, and facet counts.
 
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Any
 
@@ -16,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.config import get_settings
 from backend.core.database import get_db
 from backend.core.models import Project, Source, Task, Transcript
-from backend.core.schemas import SearchRequest, SearchResponse
+from backend.core.schemas import QACitation, QARequest, QAResponse, SearchRequest, SearchResponse
 from backend.search.engine import HybridSearchEngine
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -73,6 +74,112 @@ async def search(
         "query": request.query,
         "results": results,
     }
+
+
+@router.post("/qa", response_model=QAResponse)
+async def qa(
+    request: QARequest,
+) -> dict[str, Any]:
+    """Answer a natural-language question grounded in stored transcripts.
+
+    Retrieves the most relevant chunks via hybrid search, then asks an LLM to
+    synthesize an answer from them, attaching the retrieved chunks as citations.
+
+    Args:
+        request: Question plus optional filters and retrieval count.
+
+    Returns:
+        QAResponse with the synthesized answer and supporting citations.
+
+    Raises:
+        HTTPException: 500 on retrieval or LLM failure.
+    """
+    engine = _get_search_engine()
+
+    try:
+        filters = request.filters.model_dump(exclude_none=True) if request.filters else None
+        results = await engine.search(
+            query=request.question,
+            filters=filters,
+            limit=request.top_k,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search engine error: {exc!s}",
+        )
+
+    if not results:
+        return {
+            "question": request.question,
+            "answer": "I couldn't find any relevant material in the stored transcripts to answer this.",
+            "citations": [],
+        }
+
+    citations = [
+        QACitation(
+            chunk_id=r.chunk_id,
+            transcript_id=r.transcript_id,
+            text=r.text,
+            score=r.score,
+        )
+        for r in results
+    ]
+
+    context = "\n\n".join(
+        f"[{i + 1}] {r.text}" for i, r in enumerate(results)
+    )
+    prompt = (
+        "Answer the question using ONLY the context below. "
+        "If the context does not contain the answer, say so plainly. "
+        "Cite the source numbers in square brackets, e.g. [1], [2].\n\n"
+        f"CONTEXT:\n{context}\n\n"
+        f"QUESTION: {request.question}\n\n"
+        "ANSWER:"
+    )
+
+    try:
+        answer = await _llm_answer(prompt)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Answer generation error: {exc!s}",
+        )
+
+    return {
+        "question": request.question,
+        "answer": answer,
+        "citations": citations,
+    }
+
+
+async def _llm_answer(prompt: str) -> str:
+    """Generate an answer via the LiteLLM gateway."""
+    import litellm
+
+    settings = get_settings()
+    litellm.api_base = settings.LITELLM_URL
+    if settings.LITELLM_API_KEY:
+        litellm.api_key = settings.LITELLM_API_KEY
+
+    raw_model = os.environ.get("BB_QA_MODEL", "deepseek-v4-flash")
+    model = raw_model if "/" in raw_model else f"openai/{raw_model}"
+
+    response = await litellm.acompletion(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a precise assistant grounded strictly in the provided context. Never invent facts outside it.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.2,
+        max_tokens=800,
+        timeout=60,
+    )
+    content = (response.choices[0].message.content or "").strip()
+    return content or "No answer could be generated."
 
 
 @router.get("/similar/{transcript_id}")

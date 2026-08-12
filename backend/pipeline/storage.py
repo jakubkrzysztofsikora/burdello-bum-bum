@@ -203,6 +203,26 @@ class PipelineStorage:
 
         return chunk_ids
 
+    async def delete_chunks(self, transcript_id: uuid.UUID) -> None:
+        """Remove a transcript's chunks from Postgres and Qdrant.
+
+        Used by the resume path so re-chunking a partially-processed transcript
+        never leaves duplicate chunks behind.
+        """
+        chunk_rows = (
+            await self.db.execute(
+                select(Chunk.id).where(Chunk.transcript_id == transcript_id)
+            )
+        ).scalars().all()
+        if chunk_rows and self.search is not None:
+            try:
+                await self.search.delete_chunks([str(cid) for cid in chunk_rows])
+            except Exception:
+                logger.exception("delete_chunks: Qdrant delete failed")
+        await self.db.execute(
+            delete(Chunk).where(Chunk.transcript_id == transcript_id)
+        )
+
     async def update_transcript_status(
         self,
         transcript_id: uuid.UUID,

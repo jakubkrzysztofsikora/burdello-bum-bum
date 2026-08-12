@@ -517,6 +517,31 @@ class SearchResponse(BaseModel):
     results: list[SearchResult]
 
 
+class QACitation(BaseModel):
+    """A source chunk cited in a Q&A answer."""
+
+    chunk_id: uuid.UUID
+    transcript_id: uuid.UUID
+    text: str
+    score: float
+
+
+class QARequest(BaseModel):
+    """Request body for a natural-language Q&A query."""
+
+    question: str = Field(..., min_length=1, max_length=2000)
+    filters: SearchFilters | None = None
+    top_k: int = Field(default=6, ge=1, le=20)
+
+
+class QAResponse(BaseModel):
+    """Response to a natural-language Q&A query."""
+
+    question: str
+    answer: str
+    citations: list[QACitation]
+
+
 # ===========================================================================
 # Mining Result Schemas
 # ===========================================================================

@@ -1,6 +1,7 @@
 import type {
   FilterParams,
   SearchResponse,
+  QAResponse,
   Stats,
   WeeklySummary,
   SkillInfo,
@@ -129,6 +130,11 @@ export const api = {
     }),
   findSimilar: (id: string): Promise<SearchResponse> =>
     fetchJson(`${API_BASE}/search/similar/${id}`),
+  qa: (question: string, topK = 6): Promise<QAResponse> =>
+    fetchJson(`${API_BASE}/search/qa`, {
+      method: "POST",
+      body: JSON.stringify({ question, top_k: topK }),
+    }),
 
   // Stats
   getStats: (): Promise<Stats> => fetchJson(`${API_BASE}/stats`),

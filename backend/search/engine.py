@@ -232,6 +232,17 @@ class HybridSearchEngine:
         )
         logger.info("index_chunks: upserted %d points", len(points))
 
+    async def delete_chunks(self, chunk_ids: list[str]) -> None:
+        """Delete chunk points from Qdrant by ID."""
+        if not chunk_ids:
+            return
+        self.client.delete(
+            collection_name=self.collection,
+            points_selector=chunk_ids,
+            wait=True,
+        )
+        logger.info("delete_chunks: deleted %d points", len(chunk_ids))
+
     async def ensure_collection(self) -> None:
         """Create the Qdrant collection if it does not exist.
 
@@ -261,6 +272,33 @@ class HybridSearchEngine:
                 )
             else:
                 raise
+        await self._ensure_payload_indexes()
+
+    async def _ensure_payload_indexes(self) -> None:
+        """Create payload-field indexes so filtered search is not a full scan.
+
+        Without these, ``transcript_id`` / ``metadata.project_id`` / date filters
+        scan every on-disk payload point (1.9M+) and time out. Idempotent: Qdrant
+        ignores re-creating an existing index.
+        """
+        from qdrant_client.models import PayloadSchemaType
+
+        for field in (
+            "transcript_id",
+            "metadata.project_id",
+            "metadata.source_type",
+            "metadata.created_at",
+        ):
+            try:
+                self.client.create_payload_index(
+                    collection_name=self.collection,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+            except Exception:
+                logger.warning(
+                    "ensure_payload_indexes: could not index field %r", field, exc_info=True
+                )
 
     # ------------------------------------------------------------------
     # Helpers

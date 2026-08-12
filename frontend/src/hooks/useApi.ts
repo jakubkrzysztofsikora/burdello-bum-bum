@@ -10,7 +10,8 @@ import type {
   Task,
   Artifact,
   Bookmark,
-  SearchResponse,
+SearchResponse,
+  QAResponse,
   SkillInfo,
   MiningResult,
   TodoistProjectSummary,
@@ -147,6 +148,12 @@ export function useSearch(
     queryFn: () => api.search(query, type, filters),
     enabled: enabled && query.length > 0,
     staleTime: STALE_TIME,
+  });
+}
+
+export function useQA() {
+  return useMutation<QAResponse, Error, { question: string; topK?: number }>({
+    mutationFn: ({ question, topK }) => api.qa(question, topK),
   });
 }
 

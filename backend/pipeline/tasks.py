@@ -320,16 +320,40 @@ def normalize_task(self, extraction_result: dict[str, Any]) -> dict[str, Any]:
                         )
                     )
                 ).scalar_one()
-                transcript_id_row = (
+                transcript_row = (
                     await db.execute(
-                        select(Transcript.id)
+                        select(Transcript)
                         .where(Transcript.source_id == source_row)
                         .order_by(Transcript.created_at.asc())
                         .limit(1)
                     )
                 ).scalar_one_or_none()
+                if transcript_row is not None and transcript_row.status == "processing":
+                    # A worker kill can leave a transcript in ``processing``
+                    # with messages stored but no chunks (chunk_embed was cut
+                    # before marking completed). Re-dispatch chunk_embed to
+                    # resume it; the plain already_exists return below would
+                    # otherwise leave it stuck forever. Returns a null
+                    # transcript_id so this chain's own chunk_embed no-ops and
+                    # the re-dispatched task does the real work — no double
+                    # chunking.
+                    from backend.pipeline.tasks import chunk_embed_task
+
+                    chunk_embed_task.delay(
+                        {"transcript_id": str(transcript_row.id)}
+                    )
+                    logger.info(
+                        "normalize_task: resumed stuck processing transcript %s",
+                        transcript_row.id,
+                    )
+                    return {
+                        "transcript_id": None,
+                        "source_id": str(source_row),
+                        "status": "skipped",
+                        "reason": "already_exists_resumed",
+                    }
                 return {
-                    "transcript_id": str(transcript_id_row) if transcript_id_row else None,
+                    "transcript_id": str(transcript_row.id) if transcript_row else None,
                     "source_id": str(source_row),
                     "status": "skipped",
                     "reason": "already_exists",
@@ -527,6 +551,10 @@ def chunk_embed_task(self, payload: dict[str, Any]) -> dict[str, Any]:
                     "status": "error",
                     "reason": "empty_transcript",
                 }
+
+            # Idempotent resume: clear any prior chunks so a re-run never
+            # duplicates them (a wedged transcript may already have some).
+            await storage.delete_chunks(transcript_id)
 
             chunks = _get_semantic_chunker().create_chunks(
                 text, metadata={"transcript_id": transcript_id_str}

@@ -96,6 +96,19 @@ export interface SearchResponse {
   facets?: SearchFacets;
 }
 
+export interface QACitation {
+  chunk_id: string;
+  transcript_id: string;
+  text: string;
+  score: number;
+}
+
+export interface QAResponse {
+  question: string;
+  answer: string;
+  citations: QACitation[];
+}
+
 export interface SearchFacets {
   status: Record<string, number>;
   provider: Record<string, number>;

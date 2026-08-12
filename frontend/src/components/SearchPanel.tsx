@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Search, Loader2 } from "lucide-react";
-import { useSearch } from "../hooks/useApi";
+import { Search, Loader2, Sparkles } from "lucide-react";
+import { useSearch, useQA } from "../hooks/useApi";
 
 export function SearchPanel() {
   const [query, setQuery] = useState("");
   const [searchType, setSearchType] = useState("hybrid");
   const [searchFilters] = useState<Record<string, unknown>>({});
   const [isSearching, setIsSearching] = useState(false);
+  const [qaQuestion, setQaQuestion] = useState("");
 
   const { data, isLoading, error } = useSearch(
     query,
@@ -16,6 +17,8 @@ export function SearchPanel() {
     isSearching,
   );
 
+  const qa = useQA();
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (query.trim()) {
@@ -23,8 +26,15 @@ export function SearchPanel() {
     }
   };
 
+  const handleQA = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (qaQuestion.trim()) {
+      qa.mutate({ question: qaQuestion.trim() });
+    }
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <form onSubmit={handleSearch} className="flex gap-2">
         <div className="relative flex-1">
           <Search
@@ -56,6 +66,59 @@ export function SearchPanel() {
           {isLoading && <Loader2 size={14} className="animate-spin" />}
           Search
         </button>
+      </form>
+
+      <form onSubmit={handleQA} className="rounded-lg border border-bb-border bg-bb-card p-3">
+        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-bb-accent">
+          <Sparkles size={12} />
+          Ask a question
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={qaQuestion}
+            onChange={(e) => setQaQuestion(e.target.value)}
+            placeholder="Ask a natural-language question across transcripts..."
+            className="h-10 w-full rounded-lg border border-bb-border bg-bb-dark px-3 text-sm text-bb-text placeholder:text-bb-muted focus:border-bb-accent focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={qa.isPending || !qaQuestion.trim()}
+            className="flex items-center gap-1.5 rounded-lg bg-bb-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-600 disabled:opacity-50"
+          >
+            {qa.isPending && <Loader2 size={14} className="animate-spin" />}
+            Ask
+          </button>
+        </div>
+
+        {qa.isError && (
+          <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-sm text-red-400">
+            {qa.error.message || "Failed to generate answer"}
+          </div>
+        )}
+
+        {qa.data && (
+          <div className="mt-3 space-y-2">
+            <p className="text-sm leading-relaxed text-bb-text">{qa.data.answer}</p>
+            {qa.data.citations.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium text-bb-muted">
+                  Sources ({qa.data.citations.length})
+                </div>
+                {qa.data.citations.map((c) => (
+                  <Link
+                    key={c.chunk_id}
+                    to={`/transcripts/${c.transcript_id}`}
+                    className="block rounded border border-bb-border bg-bb-dark p-2 text-xs text-bb-text transition hover:border-bb-accent/50"
+                  >
+                    <span className="text-bb-accent">score {c.score.toFixed(3)}</span>
+                    <span className="ml-2 line-clamp-2">{c.text}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </form>
 
       {error && (
