@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     BB_EMBEDDING_MODEL: str = "nomic-embed-text-v2"
     BB_CHUNK_SIZE: int = 512
     BB_CHUNK_OVERLAP: int = 50
+    # Wall-clock budget for one chunk-embed task pass, in seconds. Kept well
+    # below Celery's 1-hour ``task_time_limit`` so a huge transcript is
+    # suspended early and resumed by a re-dispatched task instead of being
+    # killed and wedged. 1500s = 25min.
+    BB_EMBED_TIME_BUDGET_SECONDS: int = 1500
 
     class Config:
         """Pydantic config."""

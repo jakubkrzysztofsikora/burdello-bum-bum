@@ -10,7 +10,7 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import delete, exists, select
+from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -202,6 +202,309 @@ class PipelineStorage:
                 # Don't raise — PostgreSQL is the source of truth
 
         return chunk_ids
+
+    async def store_chunk_shells(
+        self,
+        transcript_id: uuid.UUID,
+        chunks: list[dict[str, Any]],
+        enrichment: dict[str, Any] | None = None,
+    ) -> list[uuid.UUID]:
+        """Insert unembedded chunk shells (embedding NULL) into PostgreSQL.
+
+        Shells carry text + metadata; the embedding is filled in later, in
+        bounded batches, so a huge transcript dodges the 1-hour task limit.
+
+        Args:
+            transcript_id: UUID of the parent transcript.
+            chunks: List of chunk dicts with ``text`` and optional ``metadata``.
+            enrichment: Optional project/source fields stamped onto every
+                shell's metadata so the vector store can filter by them.
+
+        Returns:
+            List of chunk UUIDs created in PostgreSQL.
+        """
+        chunk_ids: list[uuid.UUID] = []
+        for idx, chunk_data in enumerate(chunks):
+            chunk_id = uuid.uuid4()
+            metadata = dict(chunk_data.get("metadata", {}))
+            if enrichment:
+                metadata.update(enrichment)
+            chunk = Chunk(
+                id=chunk_id,
+                transcript_id=transcript_id,
+                text=chunk_data["text"],
+                embedding=None,
+                chunk_index=idx,
+                metadata_=metadata,
+            )
+            self.db.add(chunk)
+            chunk_ids.append(chunk_id)
+        await self.db.flush()
+        return chunk_ids
+
+    async def load_unembedded_chunks(
+        self,
+        transcript_id: uuid.UUID,
+        limit: int,
+    ) -> list[tuple[uuid.UUID, str]]:
+        """Return ``(chunk_id, text)`` for chunks still awaiting an embedding.
+
+        Ordered by ``chunk_index`` (oldest first) and bounded by ``limit``
+        so the embedder works in resumable slices.
+
+        Args:
+            transcript_id: UUID of the parent transcript.
+            limit: Maximum number of chunks to return.
+
+        Returns:
+            List of ``(chunk_id, text)`` tuples.
+        """
+        rows = (
+            await self.db.execute(
+                select(Chunk.id, Chunk.text)
+                .where(Chunk.transcript_id == transcript_id)
+                .where(Chunk.embedding.is_(None))
+                .order_by(Chunk.chunk_index)
+                .limit(limit)
+            )
+        ).all()
+        return [(r[0], r[1]) for r in rows]
+
+    async def count_unembedded(self, transcript_id: uuid.UUID) -> int:
+        """Count chunks that still have a NULL embedding for a transcript."""
+        return int(
+            (
+                await self.db.execute(
+                    select(func.count())
+                    .select_from(Chunk)
+                    .where(Chunk.transcript_id == transcript_id)
+                    .where(Chunk.embedding.is_(None))
+                )
+            ).scalar_one()
+        )
+
+    async def count_chunks(self, transcript_id: uuid.UUID) -> int:
+        """Count all chunk rows (embedded or not) for a transcript."""
+        return int(
+            (
+                await self.db.execute(
+                    select(func.count())
+                    .select_from(Chunk)
+                    .where(Chunk.transcript_id == transcript_id)
+                )
+            ).scalar_one()
+        )
+
+    async def update_chunk_embeddings(
+        self,
+        transcript_id: uuid.UUID,
+        embeddings: dict[uuid.UUID, list[float]],
+    ) -> None:
+        """Stamp computed embeddings onto chunk rows.
+
+        Args:
+            transcript_id: UUID of the parent transcript (safety guard).
+            embeddings: Mapping of chunk UUID to 768-dim vector.
+        """
+        if not embeddings:
+            return
+        for chunk_id, vector in embeddings.items():
+            await self.db.execute(
+                update(Chunk)
+                .where(Chunk.transcript_id == transcript_id)
+                .where(Chunk.id == chunk_id)
+                .values(embedding=[float(v) for v in vector])
+                .execution_options(synchronize_session="fetch")
+            )
+
+    async def embed_chunks_budgeted(
+        self,
+        transcript_id: uuid.UUID,
+        embed_batch: Any,
+        batch_size: int,
+        time_budget_ns: int,
+    ) -> tuple[bool, int]:
+        """Embed a transcript's outstanding chunks in bounded, time-guarded batches.
+
+        Fetches unembedded chunks in slices of ``batch_size``, embeds each via
+        ``embed_batch``, and writes vectors back. If the wall-clock budget is
+        consumed before the queue drains, returns ``(exhausted=True, done)`` so
+        the caller can re-dispatch a continuation; the remaining NULL-embedding
+        rows are exactly the resume point.
+
+        Args:
+            transcript_id: UUID of the parent transcript.
+            embed_batch: Callable ``(texts: list[str]) -> list[list[float]]``.
+            batch_size: Max chunks per embed call.
+            time_budget_ns: Nanoseconds of wall time before handing back.
+
+        Returns:
+            ``(budget_exhausted, chunks_completed)``.
+        """
+        import time as _time
+
+        done = 0
+        start = _time.monotonic()
+        while True:
+            batch = await self.load_unembedded_chunks(transcript_id, limit=batch_size)
+            if not batch:
+                return False, done
+            texts = [text for _, text in batch]
+            vectors = embed_batch(texts)
+            await self.update_chunk_embeddings(
+                transcript_id,
+                {cid: vector for cid, vector in zip((cid for cid, _ in batch), vectors)},
+            )
+            await self.db.flush()
+            done += len(batch)
+            if _time.monotonic() - start >= time_budget_ns / 1e9:
+                return True, done
+        return False, done
+
+    async def index_transcript_chunks(self, transcript_id: uuid.UUID) -> int:
+        """Upsert a transcript's fully-embedded chunks into Qdrant.
+
+        Reads chunks from PostgreSQL (the source of truth) after the resumable
+        embed pass finishes and indexes any that are not yet in Qdrant. Only
+        chunks with a non-null embedding are indexed.
+
+        Chunks created before project enrichment existed are backfilled here:
+        missing ``project_id``/``source_type`` fields are stamped from the
+        source context (creating the Project row on demand) so re-indexed data
+        matches the filter contract, and the result is persisted back to
+        PostgreSQL to keep it authoritative.
+
+        Args:
+            transcript_id: UUID of the parent transcript.
+
+        Returns:
+            Number of chunks indexed.
+        """
+        if self.search is None:
+            return 0
+        rows = (
+            await self.db.execute(
+                select(Chunk)
+                .where(Chunk.transcript_id == transcript_id)
+                .where(Chunk.embedding.isnot(None))
+                .order_by(Chunk.chunk_index)
+            )
+        ).scalars().all()
+        if not rows:
+            return 0
+
+        enrichment = await self.get_chunk_enrichment(transcript_id)
+        changed: list[Chunk] = []
+        chunks: list[dict[str, Any]] = []
+        for c in rows:
+            metadata = dict(c.metadata_ or {})
+            if "project_id" not in metadata:
+                metadata.update(enrichment)
+                c.metadata_ = metadata
+                changed.append(c)
+            chunks.append(
+                {
+                    "id": str(c.id),
+                    "transcript_id": str(transcript_id),
+                    "text": c.text,
+                    "embedding": c.embedding,
+                    "metadata": metadata,
+                }
+            )
+        if changed:
+            await self.db.flush()
+        try:
+            await self.search.index_chunks(chunks)
+        except Exception:
+            logger.exception("index_transcript_chunks: Qdrant upsert failed")
+        return len(chunks)
+
+    async def get_or_create_project_by_name(
+        self, name: str, description: str | None = None
+    ) -> uuid.UUID:
+        """Return the Project id for ``name``, creating it if absent.
+
+        Race-safe: parallel callers that both miss the SELECT resolve on the
+        UNIQUE(name) constraint via a savepoint-scoped insert.
+
+        Args:
+            name: Canonical humanized project name.
+            description: Optional description on first creation.
+
+        Returns:
+            The Project's UUID.
+        """
+        existing = (
+            await self.db.execute(select(Project).where(Project.name == name))
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing.id  # type: ignore[return-value]
+        project = Project(
+            name=name,
+            description=description,
+            status="active",
+            metadata_={"confidence": 1.0},
+        )
+        try:
+            async with self.db.begin_nested():
+                self.db.add(project)
+                await self.db.flush()
+        except IntegrityError:
+            existing = (
+                await self.db.execute(select(Project).where(Project.name == name))
+            ).scalar_one()
+            return existing.id  # type: ignore[return-value]
+        return project.id  # type: ignore[return-value]
+
+    async def get_chunk_enrichment(
+        self, transcript_id: uuid.UUID, humanized: str | None = None
+    ) -> dict[str, Any]:
+        """Resolve project + source context to stamp onto chunk metadata.
+
+        Returns a dict with ``project_id``, ``source_type``, and ``created_at``
+        so a transcript's chunks are filterable by those fields in Qdrant. When
+        no source row or identity can be resolved, returns only what exists
+        (never raising).
+
+        Args:
+            transcript_id: UUID of the parent transcript.
+            humanized: Optional pre-resolved project humanized name; if omitted
+                the source path is resolved via ``resolve_from_path``.
+
+        Returns:
+            Field dict (possibly empty) to merge into chunk metadata.
+        """
+        row = (
+            await self.db.execute(
+                select(
+                    Source.metadata_["file_path"].as_string(),
+                    Source.source_type,
+                    Source.created_at,
+                )
+                .join(Transcript, Transcript.source_id == Source.id)
+                .where(Transcript.id == transcript_id)
+            )
+        ).first()
+        if row is None:
+            return {}
+        file_path, source_type, created_at = row[0], row[1], row[2]
+
+        enrichment: dict[str, Any] = {}
+        if source_type:
+            enrichment["source_type"] = source_type
+        if created_at is not None:
+            enrichment["created_at"] = created_at.isoformat()
+
+        if not humanized:
+            from backend.pipeline.repo_resolver import resolve_from_path
+
+            identity = resolve_from_path(file_path) if file_path else None
+            humanized = identity.humanized if identity is not None else None
+        if humanized:
+            project_id = await self.get_or_create_project_by_name(humanized)
+            enrichment["project_id"] = str(project_id)
+
+        return enrichment
 
     async def delete_chunks(self, transcript_id: uuid.UUID) -> None:
         """Remove a transcript's chunks from Postgres and Qdrant.

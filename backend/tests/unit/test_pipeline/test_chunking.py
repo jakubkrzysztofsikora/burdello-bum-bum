@@ -42,8 +42,7 @@ def mock_encoder():
 
     mock_model.encode = mock_encode
 
-    with patch("backend.pipeline.chunking.SentenceTransformer", return_value=mock_model):
-        with patch.object(SemanticChunker, "__init__", lambda self, *a, **kw: setattr(self, "model", mock_model) or setattr(self, "threshold", 0.75) or setattr(self, "max_size", 512)):
+    with patch.object(SemanticChunker, "__init__", lambda self, *a, **kw: setattr(self, "model", mock_model) or setattr(self, "threshold", 0.75) or setattr(self, "max_size", 512) or setattr(self, "max_semantic_utterances", 30)):
             yield mock_model
 
 

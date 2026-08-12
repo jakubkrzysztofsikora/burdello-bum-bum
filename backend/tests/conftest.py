@@ -7,6 +7,7 @@ and an HTTP async client for FastAPI endpoint testing.
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from typing import AsyncGenerator, Generator
 
@@ -14,6 +15,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -27,8 +29,12 @@ from backend.main import create_app
 
 # ---------------------------------------------------------------------------
 # Test database URL (shared in-memory or temp PostgreSQL)
+#
+# Host is overridable (TEST_DB_HOST) so the suite also runs inside the worker
+# container where postgres is reached via the ``bb-postgres`` service name.
 # ---------------------------------------------------------------------------
-TEST_DATABASE_URL = "postgresql+asyncpg://bbuser:bbpass@localhost:5432/burdello_test"
+_TEST_DB_HOST = os.environ.get("TEST_DB_HOST", "localhost")
+TEST_DATABASE_URL = f"postgresql+asyncpg://bbuser:bbpass@{_TEST_DB_HOST}:5432/burdello_test"
 
 # ---------------------------------------------------------------------------
 # Event loop
@@ -81,7 +87,7 @@ def test_settings() -> Settings:
 # ---------------------------------------------------------------------------
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def test_engine(test_settings: Settings) -> AsyncGenerator:
     """Create a test database engine and initialise all tables.
 
@@ -96,6 +102,7 @@ async def test_engine(test_settings: Settings) -> AsyncGenerator:
     )
 
     async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
 
     yield engine

@@ -340,7 +340,7 @@ def normalize_task(self, extraction_result: dict[str, Any]) -> dict[str, Any]:
                     from backend.pipeline.tasks import chunk_embed_task
 
                     chunk_embed_task.delay(
-                        {"transcript_id": str(transcript_row.id)}
+                        {"transcript_id": str(transcript_row.id), "resume": True}
                     )
                     logger.info(
                         "normalize_task: resumed stuck processing transcript %s",
@@ -544,6 +544,38 @@ def chunk_embed_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         async with AsyncSessionLocal() as db:
             storage = PipelineStorage(db=db, search_engine=_get_search_engine())
 
+            resume = bool(payload.get("resume")) and await storage.count_chunks(transcript_id) > 0
+            if resume:
+                # Continuation pass: shells already exist, only embed the
+                # remaining NULL-embedding rows. Never re-chunk or delete.
+                exhausted, done = await storage.embed_chunks_budgeted(
+                    transcript_id,
+                    embed_batch=_get_embedding_engine().embed_batch,
+                    batch_size=64,
+                    time_budget_ns=get_settings().BB_EMBED_TIME_BUDGET_SECONDS * 1_000_000_000,
+                )
+                if exhausted:
+                    await db.commit()
+                    chunk_embed_task.delay(
+                        {"transcript_id": transcript_id_str, "resume": True}
+                    )
+                    # Don't let the chained mine_task run on a partially
+                    # embedded transcript; the continuation owns completion.
+                    return {
+                        "transcript_id": None,
+                        "status": "partial",
+                        "embedded_count": done,
+                    }
+                await storage.index_transcript_chunks(transcript_id)
+                await storage.update_transcript_status(transcript_id, "completed")
+                await _link_session_bookmarks(db, transcript_id)
+                await db.commit()
+                return {
+                    "transcript_id": transcript_id_str,
+                    "status": "embedded",
+                    "embedded_count": done,
+                }
+
             text = await storage.get_transcript_text(transcript_id)
             if not text:
                 return {
@@ -552,8 +584,8 @@ def chunk_embed_task(self, payload: dict[str, Any]) -> dict[str, Any]:
                     "reason": "empty_transcript",
                 }
 
-            # Idempotent resume: clear any prior chunks so a re-run never
-            # duplicates them (a wedged transcript may already have some).
+            # Idempotent re-chunk: clear prior chunks so a fresh run never
+            # duplicates (a wedged transcript may already have some).
             await storage.delete_chunks(transcript_id)
 
             chunks = _get_semantic_chunker().create_chunks(
@@ -565,15 +597,38 @@ def chunk_embed_task(self, payload: dict[str, Any]) -> dict[str, Any]:
                 await db.commit()
                 return {"transcript_id": transcript_id_str, "status": "no_chunks"}
 
-            embedded_chunks = _get_embedding_engine().embed_chunks(chunks)
-            chunk_ids = await storage.store_chunks(transcript_id, embedded_chunks)
+            await storage.store_chunk_shells(
+                transcript_id,
+                chunks,
+                enrichment=await storage.get_chunk_enrichment(transcript_id),
+            )
+            exhausted, done = await storage.embed_chunks_budgeted(
+                transcript_id,
+                embed_batch=_get_embedding_engine().embed_batch,
+                batch_size=64,
+                time_budget_ns=get_settings().BB_EMBED_TIME_BUDGET_SECONDS * 1_000_000_000,
+            )
+            await db.commit()
+            if exhausted:
+                # Budget consumed before the queue drained — hand off to a
+                # resume pass instead of risking a 1h kill.
+                chunk_embed_task.delay(
+                    {"transcript_id": transcript_id_str, "resume": True}
+                )
+                return {
+                    "transcript_id": None,
+                    "status": "partial",
+                    "embedded_count": done,
+                }
+
+            await storage.index_transcript_chunks(transcript_id)
             await storage.update_transcript_status(transcript_id, "completed")
             await _link_session_bookmarks(db, transcript_id)
             await db.commit()
 
             return {
                 "transcript_id": transcript_id_str,
-                "embedded_count": len(chunk_ids),
+                "embedded_count": done,
                 "status": "embedded",
             }
 
