@@ -228,6 +228,84 @@ class MiningEngine:
 
         return curated
 
+    async def extract_knowledge(self, transcript_text: str) -> list[dict[str, Any]]:
+        """Extract reusable engineering knowledge atoms from the transcript.
+
+        Each atom captures a concrete tool/pattern/technique/decision/
+        solved-problem with a verbatim excerpt and a worked/failed/mixed
+        outcome. Used by the knowledge-base miner; clustering later groups
+        atoms into tree nodes.
+
+        Args:
+            transcript_text: Full transcript text to analyse.
+
+        Returns:
+            List of atom dicts with ``name``, ``kind``, ``category_hint``,
+            ``summary``, ``excerpt``, ``outcome``, ``confidence`` keys.
+        """
+        prompt = self._load_prompt("knowledge_extraction").format(
+            transcript_text=transcript_text[:8000]
+        )
+        response_schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "category_hint": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "excerpt": {"type": "string"},
+                    "outcome": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": [
+                    "name",
+                    "kind",
+                    "summary",
+                    "excerpt",
+                    "confidence",
+                ],
+            },
+        }
+        result = await self._call_llm(prompt, response_schema=response_schema)
+        atoms = result if isinstance(result, list) else []
+        return self._filter_knowledge_atoms(atoms)
+
+    def _filter_knowledge_atoms(
+        self, atoms: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Drop low-confidence/empty atoms and normalise outcome.
+
+        Args:
+            atoms: Raw atoms from the LLM.
+
+        Returns:
+            Curated list of atom dicts with confidence >= 0.6.
+        """
+        valid_outcomes = {"worked", "failed", "mixed"}
+        curated: list[dict[str, Any]] = []
+        for atom in atoms:
+            if not isinstance(atom, dict):
+                continue
+            confidence = float(atom.get("confidence") or 0.0)
+            if confidence < 0.6:
+                continue
+            name = str(atom.get("name", "")).strip()
+            summary = str(atom.get("summary", "")).strip()
+            if not name or not summary:
+                continue
+            outcome = atom.get("outcome")
+            if outcome is not None and str(outcome).lower() not in valid_outcomes:
+                outcome = None
+            else:
+                outcome = str(outcome).lower() if outcome is not None else None
+            atom["name"] = name
+            atom["summary"] = summary
+            atom["outcome"] = outcome
+            curated.append(atom)
+        return curated
+
     async def find_missing_elements(self, transcript_text: str) -> list[str]:
         """Find incomplete work items in the transcript.
 

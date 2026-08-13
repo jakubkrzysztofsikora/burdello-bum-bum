@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -157,11 +158,14 @@ def process_source(self, source_path: str, provider_hint: str | None = None) -> 
     # fan-out doesn't run every chunk_task before any embed_task (FIFO staging):
     # each transcript reaches `completed` before the next starts, keeping the
     # mining queue fed instead of starved behind the whole chunk backlog.
+    # knowledge_extract_task runs after mine_task so the LLM has access to
+    # transcript text once the transcript is `completed`.
     result = (
         extract_task.s(source_path, provider_hint)
         | normalize_task.s()
         | chunk_embed_task.s()
         | mine_task.s()
+        | knowledge_extract_task.s()
     ).apply_async()
 
     return {
@@ -757,6 +761,135 @@ def mine_task(self, embed_result: dict[str, Any]) -> dict[str, Any]:
         return result
     except Exception as exc:
         logger.exception("mine_task: failed for %s", transcript_id_str)
+        raise self.retry(exc=exc) from exc
+
+
+# Common patterns of secrets that may appear inside transcript excerpts.
+# Match the value but keep the prefix/suffix so humans can see what was
+# redacted (e.g. "sk-XXXX" → "sk-[REDACTED]"). Transcripts are user content
+# and may legitimately include credentials; we never want them persisting
+# into KB atoms that become public.
+_SECRET_PATTERNS: tuple[str, ...] = (
+    r"\bsk-[A-Za-z0-9_-]{20,}",
+    r"\bsk_live_[A-Za-z0-9]{16,}",
+    r"\bghp_[A-Za-z0-9]{20,}",
+    r"\bgithub_pat_[A-Za-z0-9_]{20,}",
+    r"\bxox[abp]-[A-Za-z0-9-]{10,}",
+    r"\bAIza[0-9A-Za-z_-]{30,}",
+    r"\bAKIA[0-9A-Z]{16}",
+    r"\bASIA[0-9A-Z]{16}",
+    r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+)
+
+
+def _scrub_secrets(text: str | None) -> str | None:
+    """Redact likely secrets from a free-text excerpt.
+
+    Args:
+        text: Excerpt that may contain credentials.
+
+    Returns:
+        The text with matched secret values replaced by ``[REDACTED]``,
+        or ``None`` when the input is ``None``.
+    """
+    if not text:
+        return text
+    out = text
+    for pat in _SECRET_PATTERNS:
+        out = re.sub(pat, "[REDACTED]", out)
+    return out
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def knowledge_extract_task(
+    self, mine_result: dict[str, Any]
+) -> dict[str, Any]:
+    """Extract reusable engineering knowledge atoms from a transcript.
+
+    Runs after ``mine_task``. Calls the LLM with an injection-safe prompt,
+    scrubs any secrets from the resulting excerpts, and persists the atoms
+    as a ``MiningResult(miner_type='knowledge')`` row so downstream
+    clustering can group them into KB nodes.
+
+    Args:
+        mine_result: Output from ``mine_task``. Only ``transcript_id`` is
+            required; the rest is passed through unchanged.
+
+    Returns:
+        Dict with ``transcript_id`` and ``atom_count`` on success; on
+        transient LLM failure the task is retried up to ``max_retries``.
+    """
+    import asyncio
+    import re
+
+    transcript_id_str = mine_result.get("transcript_id")
+    if not transcript_id_str:
+        return {**mine_result, "status": "error", "reason": "no_transcript_id"}
+
+    transcript_id = uuid.UUID(transcript_id_str)
+
+    async def _run() -> dict[str, Any]:
+        async with AsyncSessionLocal() as db:
+            storage = PipelineStorage(db=db)
+            text = await storage.get_transcript_text(transcript_id)
+            if not text:
+                return {
+                    "transcript_id": transcript_id_str,
+                    "atom_count": 0,
+                    "status": "skipped",
+                    "reason": "empty_transcript",
+                }
+
+            settings = get_settings()
+            from backend.mining.engine import MiningEngine
+
+            engine = MiningEngine(litellm_url=settings.LITELLM_URL)
+            atoms = await engine.extract_knowledge(text)
+
+            # Defensive: scrub secrets from excerpts before persisting. The
+            # prompt already instructs the model to redact; this is a
+            # belt-and-braces second pass.
+            for atom in atoms:
+                atom["excerpt"] = _scrub_secrets(atom.get("excerpt"))
+                atom["summary"] = _scrub_secrets(atom.get("summary"))
+
+            from backend.core.models import MiningResult
+
+            # Idempotency: only this miner's rows are wiped before re-insert,
+            # so a re-run of mine_task never nukes knowledge atoms.
+            await storage.delete_mining_results_by_type(
+                transcript_id, "knowledge"
+            )
+
+            if atoms:
+                avg_conf = sum(
+                    float(a.get("confidence") or 0.0) for a in atoms
+                ) / len(atoms)
+                db.add(
+                    MiningResult(
+                        transcript_id=transcript_id,
+                        miner_type="knowledge",
+                        result_data={"atoms": atoms},
+                        confidence=avg_conf,
+                        metadata_={"atom_count": len(atoms)},
+                    )
+                )
+
+            await db.commit()
+
+            return {
+                "transcript_id": transcript_id_str,
+                "atom_count": len(atoms),
+                "status": "ok",
+            }
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        logger.exception(
+            "knowledge_extract_task: failed for %s", transcript_id_str
+        )
         raise self.retry(exc=exc) from exc
 
 

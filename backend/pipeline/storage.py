@@ -506,6 +506,32 @@ class PipelineStorage:
 
         return enrichment
 
+    async def delete_mining_results_by_type(
+        self,
+        transcript_id: uuid.UUID,
+        miner_type: str,
+    ) -> int:
+        """Delete MiningResult rows of a specific miner type for one transcript.
+
+        Used by per-miner tasks (e.g. knowledge_extract_task) so a retry
+        never duplicates rows, without affecting other miners' output for
+        the same transcript.
+
+        Args:
+            transcript_id: UUID of the transcript whose rows to delete.
+            miner_type: Miner category to scope the delete to.
+
+        Returns:
+            Number of rows deleted.
+        """
+        result = await self.db.execute(
+            delete(MiningResult).where(
+                MiningResult.transcript_id == transcript_id,
+                MiningResult.miner_type == miner_type,
+            )
+        )
+        return int(result.rowcount or 0)
+
     async def delete_chunks(self, transcript_id: uuid.UUID) -> None:
         """Remove a transcript's chunks from Postgres and Qdrant.
 
@@ -615,6 +641,9 @@ class PipelineStorage:
         # re-inserting, so re-mining (e.g. after an LLM outage produced empty
         # results) never duplicates tasks/artifacts/mining rows. Projects are
         # shared across transcripts (deduped by name), so they are left intact.
+        # Knowledge-base atoms use their own miner_type and are wiped by
+        # knowledge_extract_task's own idempotency path; never delete them
+        # here or a re-run of mine_task would clobber the KB feed.
         await self.db.execute(
             delete(Task).where(Task.source_transcript_id == transcript_id)
         )
@@ -622,7 +651,10 @@ class PipelineStorage:
             delete(Artifact).where(Artifact.source_transcript_id == transcript_id)
         )
         await self.db.execute(
-            delete(MiningResult).where(MiningResult.transcript_id == transcript_id)
+            delete(MiningResult).where(
+                MiningResult.transcript_id == transcript_id,
+                MiningResult.miner_type != "knowledge",
+            )
         )
 
         # --- Projects (get-or-create by name) ---
