@@ -1,7 +1,9 @@
 """Hierarchy assembly: attach clusters under seed roots + RAPTOR linkage."""
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -87,7 +89,6 @@ def build_hierarchy(clusters: list[Cluster]) -> list[HierNode]:
     grouped = _group_by_seed(clusters)
 
     out: list[HierNode] = []
-    leaf_counter = 0
 
     for seed in CATEGORY_SEEDS:
         seed_clusters = grouped.get(seed.slug, [])
@@ -129,8 +130,7 @@ def build_hierarchy(clusters: list[Cluster]) -> list[HierNode]:
             out.append(sub_node)
 
             for cluster in sibling_clusters:
-                leaf_counter += 1
-                leaf_slug = f"{seed.slug}-{leaf_counter}"
+                leaf_slug = _content_slug(seed.slug, cluster)
                 leaf_node = HierNode(
                     slug=leaf_slug,
                     title=_cluster_title(cluster),
@@ -181,3 +181,29 @@ def _avg_confidence(clusters: list[Cluster]) -> float:
     total = sum(a.confidence for c in clusters for a in c.atoms)
     n = sum(len(c.atoms) for c in clusters)
     return float(total / n) if n else 0.0
+
+
+def _content_slug(seed_slug: str, cluster: Cluster) -> str:
+    """Deterministic leaf slug from cluster content.
+
+    Slug = ``{seed_slug}-{first_two_terms_joined}-{6char_hash}``. Hash suffix
+    disambiguates clusters that share the same top terms but differ in the
+    long tail, so re-runs produce the same slug for the same atoms.
+
+    Args:
+        seed_slug: Root category slug.
+        cluster: Cluster whose top terms + atoms seed the slug.
+
+    Returns:
+        Stable, URL-safe slug string.
+    """
+    terms = [
+        re.sub(r"[^a-z0-9]+", "-", t.lower()).strip("-")
+        for t in cluster.top_terms[:2]
+    ]
+    terms = [t[:16] for t in terms if t] or ["topic"]
+    joined = "-".join(terms)
+    digest = hashlib.sha256(
+        (cluster.mechanical_key + "|" + seed_slug).encode()
+    ).hexdigest()[:6]
+    return f"{seed_slug}-{joined}-{digest}"

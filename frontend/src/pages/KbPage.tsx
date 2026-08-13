@@ -67,8 +67,6 @@ export function KbPage() {
   if (!node) return null;
 
   const isDraft = node.status === "draft";
-  const breadcrumbs: KbNodeDetail[] = [];
-  // Walk parents — render the trail once we have it.
 
   return (
     <div className="space-y-6 p-6">

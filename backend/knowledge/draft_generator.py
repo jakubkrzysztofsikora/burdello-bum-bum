@@ -142,6 +142,9 @@ async def generate_node_summary(node: HierNode) -> str | None:
     return "\n".join(parts).strip() or _fallback_summary(node)
 
 
+_FALLBACK_ATOM_CAP = 20
+
+
 def _fallback_summary(node: HierNode) -> str:
     """Deterministic summary when the LLM is unavailable.
 
@@ -149,18 +152,27 @@ def _fallback_summary(node: HierNode) -> str:
         node: Leaf node whose atoms should be summarised heuristically.
 
     Returns:
-        Plain markdown summary using atom names + outcomes.
+        Plain markdown summary using atom names + outcomes. Long clusters
+        are truncated to ``_FALLBACK_ATOM_CAP`` atoms with a count note so
+        the page stays readable.
     """
+    atoms = node.atoms
+    if not atoms:
+        return "(no atoms)"
+
+    head = atoms[:_FALLBACK_ATOM_CAP]
     lines: list[str] = []
-    name_counts: dict[str, int] = {}
-    for atom in node.atoms:
+    for atom in head:
         outcome = atom.outcome or "neutral"
         line = f"- **{atom.name}** ({outcome}) — {atom.summary[:160]}"
         lines.append(line)
-        name_counts[atom.name] = name_counts.get(atom.name, 0) + 1
-    if not lines:
-        return "(no atoms)"
-    header = f"{node.title} — observed across {len(node.atoms)} atom(s)."
+
+    header = f"{node.title} — observed across {len(atoms)} atom(s)."
+    if len(atoms) > _FALLBACK_ATOM_CAP:
+        header += (
+            f" Showing the first {_FALLBACK_ATOM_CAP}; "
+            "see the evidence panel for the full list."
+        )
     return header + "\n\n" + "\n".join(lines)
 
 

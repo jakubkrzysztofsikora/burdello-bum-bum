@@ -8,20 +8,16 @@ of creating duplicates, and human-published nodes keep their status.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import uuid
-from collections import defaultdict
 from typing import Any
 
-import numpy as np
 from celery import shared_task
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from backend.core.config import get_settings
 from backend.core.database import AsyncSessionLocal
-from backend.core.models import Chunk, KbEntity, KbEntityMention, KbNode, KbNodeSource, MiningResult
+from backend.core.models import KbNode, KbNodeSource, MiningResult
 from backend.knowledge.clusterer import Atom, cluster_atoms, embed_atoms
 from backend.knowledge.draft_generator import generate_node_summary
 from backend.knowledge.hierarchy import HierNode, build_hierarchy
@@ -121,6 +117,7 @@ async def _persist_nodes(
     db: Any,
     nodes: list[HierNode],
     leaf_summaries: dict[str, str | None],
+    engine: Any,
 ) -> int:
     """Upsert ``KbNode`` rows for every ``HierNode``.
 
@@ -128,6 +125,7 @@ async def _persist_nodes(
         db: Async SQLAlchemy session.
         nodes: All ``HierNode`` records (roots + subcategories + leaves).
         leaf_summaries: Pre-generated summaries keyed by leaf slug.
+        engine: Embedding engine used to populate the node's vector.
 
     Returns:
         Number of leaf nodes persisted (for logging).
@@ -179,6 +177,12 @@ async def _persist_nodes(
                 select(KbNode).where(KbNode.slug == node.slug)
             )
         ).scalar_one_or_none()
+
+        leaf_text = _node_embedding_text(node, summary_text)
+        embedding_vec = (
+            engine.embed(leaf_text) if leaf_text else None
+        )
+
         if existing is None:
             existing = KbNode(
                 slug=node.slug,
@@ -191,6 +195,7 @@ async def _persist_nodes(
                 confidence=node.confidence,
                 status="draft",
                 source_evidence_count=len(node.atoms),
+                embedding=embedding_vec,
             )
             db.add(existing)
             await db.flush()
@@ -209,11 +214,35 @@ async def _persist_nodes(
                 existing.status = "published"
             if summary_text and not existing.summary:
                 existing.summary = summary_text
+            if embedding_vec is not None and existing.embedding is None:
+                existing.embedding = embedding_vec
         slug_to_node[node.slug] = existing
         if node.node_type == "topic":
             leaf_count += 1
 
     return leaf_count
+
+
+def _node_embedding_text(node: HierNode, summary: str | None) -> str | None:
+    """Concatenate the fields used to embed a node for vector search.
+
+    Args:
+        node: Leaf node being persisted.
+        summary: LLM-generated summary, if available.
+
+    Returns:
+        Text suitable for embedding, or ``None`` if the node has nothing
+        meaningful to embed.
+    """
+    parts: list[str] = []
+    if summary:
+        parts.append(summary)
+    if node.title:
+        parts.append(node.title)
+    if node.top_terms:
+        parts.append(" ".join(node.top_terms))
+    text = " \n".join(parts).strip()
+    return text or None
 
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
@@ -226,6 +255,30 @@ def kb_cluster_task(self) -> dict[str, Any]:
     """
     async def _run() -> dict[str, Any]:
         async with AsyncSessionLocal() as db:
+            # Always ensure the 10 root nodes exist so the UI shows
+            # structure even before any atoms accumulate.
+            from backend.knowledge.seeds import CATEGORY_SEEDS
+
+            for seed in CATEGORY_SEEDS:
+                existing = (
+                    await db.execute(
+                        select(KbNode).where(KbNode.slug == seed.slug)
+                    )
+                ).scalar_one_or_none()
+                if existing is None:
+                    db.add(
+                        KbNode(
+                            slug=seed.slug,
+                            title=seed.title,
+                            node_type="category",
+                            parent_id=None,
+                            summary=seed.summary,
+                            mechanical_key=f"root:{seed.slug}",
+                            status="published",
+                            confidence=1.0,
+                        )
+                    )
+
             rows = (
                 await db.execute(
                     select(MiningResult).where(
@@ -236,12 +289,13 @@ def kb_cluster_task(self) -> dict[str, Any]:
 
             atoms = _load_atoms(list(rows))
             if len(atoms) < 2:
+                await db.commit()
                 return {
                     "status": "skipped",
                     "reason": "not_enough_atoms",
                     "atoms": len(atoms),
                     "clusters": 0,
-                    "nodes": 0,
+                    "nodes": len(CATEGORY_SEEDS),
                     "leaves": 0,
                 }
 
@@ -258,7 +312,7 @@ def kb_cluster_task(self) -> dict[str, Any]:
             for leaf in leaf_nodes:
                 leaf_summaries[leaf.slug] = await generate_node_summary(leaf)
 
-            leaf_count = await _persist_nodes(db, nodes, leaf_summaries)
+            leaf_count = await _persist_nodes(db, nodes, leaf_summaries, engine)
             await _attach_evidence(db, leaf_nodes)
             await db.commit()
 
