@@ -867,3 +867,297 @@ class TodoistTaskLink(Base, TimestampMixin):
             f"task_id={self.task_id!s}, "
             f"todoist_task_id={self.todoist_task_id!r})>"
         )
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Base
+# ---------------------------------------------------------------------------
+
+
+class KbNode(Base, TimestampMixin):
+    """Curated node in the knowledge-base tree."""
+
+    __tablename__ = "kb_nodes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("kb_nodes.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    slug: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        unique=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+    )
+    node_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="topic",
+        comment="category|topic|subcategory",
+    )
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding: Mapped[Any] = mapped_column(
+        Vector(768),
+        nullable=True,
+        comment="768-dim cosine-normalised embedding from nomic-embed-text-v2",
+    )
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="draft",
+        comment="draft|published|archived",
+    )
+    mechanical_key: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        unique=True,
+        comment="Stable dedup key: topic:term1:term2",
+    )
+    top_terms: Mapped[list | None] = mapped_column(
+        ARRAY(String),
+        nullable=True,
+        default=list,
+        comment="c-TF-IDF top terms for this cluster",
+    )
+    confidence: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        default=0.0,
+    )
+    source_evidence_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Distinct transcripts contributing evidence; gates auto-publish",
+    )
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+    )
+
+    # Relationships
+    parent: Mapped["KbNode | None"] = relationship(
+        "KbNode",
+        remote_side="KbNode.id",
+        back_populates="children",
+    )
+    children: Mapped[list["KbNode"]] = relationship(
+        "KbNode",
+        back_populates="parent",
+        cascade="all, delete-orphan",
+    )
+    sources: Mapped[list["KbNodeSource"]] = relationship(
+        back_populates="node",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<KbNode(id={self.id!s}, "
+            f"slug={self.slug!r}, "
+            f"status={self.status!r})>"
+        )
+
+
+class KbNodeSource(Base, TimestampMixin):
+    """Evidence link from a KB node to a transcript/chunk/project."""
+
+    __tablename__ = "kb_node_sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    node_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("kb_nodes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    transcript_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("transcripts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    chunk_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("chunks.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="worked_example",
+        comment="worked_example|solved_problem|decision|pitfall|pattern",
+    )
+    outcome: Mapped[str | None] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="worked|failed|mixed",
+    )
+    confidence: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        default=1.0,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "node_id",
+            "chunk_id",
+            name="uq_kb_node_sources_node_chunk",
+        ),
+    )
+
+    # Relationships
+    node: Mapped["KbNode"] = relationship(back_populates="sources")
+
+    def __repr__(self) -> str:
+        return (
+            f"<KbNodeSource(id={self.id!s}, "
+            f"node_id={self.node_id!s}, "
+            f"transcript_id={self.transcript_id!s})>"
+        )
+
+
+class KbEntity(Base, TimestampMixin):
+    """Keyword/tool/pattern entry in the knowledge-base index."""
+
+    __tablename__ = "kb_entities"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    canonical_name: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        unique=True,
+    )
+    aliases: Mapped[list | None] = mapped_column(
+        ARRAY(String),
+        nullable=True,
+        default=list,
+    )
+    entity_type: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="tool",
+        comment="tool|library|framework|pattern|technique|concept",
+    )
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    how_used: Mapped[str | None] = mapped_column(Text, nullable=True)
+    why_used: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mention_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    embedding: Mapped[Any] = mapped_column(
+        Vector(768),
+        nullable=True,
+    )
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+    )
+
+    # Relationships
+    mentions: Mapped[list["KbEntityMention"]] = relationship(
+        back_populates="entity",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<KbEntity(id={self.id!s}, "
+            f"canonical_name={self.canonical_name!r}, "
+            f"entity_type={self.entity_type!r})>"
+        )
+
+
+class KbEntityMention(Base, TimestampMixin):
+    """A single occurrence of an entity in a transcript/node."""
+
+    __tablename__ = "kb_entity_mentions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("kb_entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    node_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("kb_nodes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    transcript_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("transcripts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    chunk_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("chunks.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    context_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outcome: Mapped[str | None] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="worked|failed|mixed",
+    )
+    first_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_id",
+            "chunk_id",
+            name="uq_kb_entity_mentions_entity_chunk",
+        ),
+    )
+
+    # Relationships
+    entity: Mapped["KbEntity"] = relationship(back_populates="mentions")
+
+    def __repr__(self) -> str:
+        return (
+            f"<KbEntityMention(id={self.id!s}, "
+            f"entity_id={self.entity_id!s}, "
+            f"transcript_id={self.transcript_id!s})>"
+        )
