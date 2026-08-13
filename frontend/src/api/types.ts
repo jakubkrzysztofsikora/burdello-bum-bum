@@ -252,3 +252,89 @@ export interface FilterParams {
   project_id?: string;
   project_name?: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Knowledge Base
+// ---------------------------------------------------------------------------
+
+export interface KbNodeSummary {
+  slug: string;
+  title: string;
+  node_type: string;
+  parent_slug: string | null;
+  status: string;
+  top_terms: string[];
+  confidence: number;
+  source_evidence_count: number;
+  children: KbNodeSummary[];
+}
+
+export interface KbEvidenceItem {
+  id: string;
+  transcript_id: string | null;
+  project_id: string | null;
+  excerpt: string | null;
+  evidence_type: string;
+  outcome: string | null;
+  confidence: number | null;
+  created_at: string;
+}
+
+export interface KbNodeDetail {
+  slug: string;
+  title: string;
+  node_type: string;
+  parent_slug: string | null;
+  status: string;
+  summary: string | null;
+  top_terms: string[];
+  confidence: number;
+  source_evidence_count: number;
+  mechanical_key: string | null;
+  updated_at: string;
+  evidence: KbEvidenceItem[];
+  children: KbNodeDetail[];
+}
+
+export interface KbTreeResponse {
+  nodes: KbNodeSummary[];
+  total_nodes: number;
+  total_published: number;
+}
+
+export interface KbEntitySummary {
+  id: string;
+  canonical_name: string;
+  entity_type: string;
+  description: string | null;
+  mention_count: number;
+  aliases: string[];
+}
+
+export interface KbEntityListResponse {
+  entities: KbEntitySummary[];
+  total: number;
+}
+
+export interface KbEntityMentionItem {
+  id: string;
+  transcript_id: string | null;
+  project_id: string | null;
+  node_slug: string | null;
+  context_excerpt: string | null;
+  outcome: string | null;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+}
+
+export interface KbEntityDetail {
+  id: string;
+  canonical_name: string;
+  entity_type: string;
+  description: string | null;
+  how_used: string | null;
+  why_used: string | null;
+  mention_count: number;
+  aliases: string[];
+  mentions: KbEntityMentionItem[];
+}

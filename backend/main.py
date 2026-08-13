@@ -49,6 +49,7 @@ def _register_routers(app: FastAPI) -> None:
     """Attach all API routers to the FastAPI application."""
     from backend.api.routers.artifacts import router as artifacts_router
     from backend.api.routers.bookmarks import router as bookmarks_router
+    from backend.api.routers.kb import router as kb_router
     from backend.api.routers.ingest import router as ingest_router
     from backend.api.routers.mining import router as mining_router
     from backend.api.routers.projects import router as projects_router
@@ -74,6 +75,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(todoist_router, prefix="/api/v1")
     app.include_router(mcp_api_router, prefix="/api/v1")
     app.include_router(bookmarks_router, prefix="/api/v1")
+    app.include_router(kb_router, prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------

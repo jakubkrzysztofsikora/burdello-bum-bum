@@ -719,3 +719,110 @@ class HealthResponse(BaseModel):
     """Health check response."""
 
     status: str
+
+
+# ===========================================================================
+# Knowledge Base
+# ===========================================================================
+
+
+class KbNodeSummary(BaseModel):
+    """Lightweight node used for the tree explorer (no summary text)."""
+
+    slug: str
+    title: str
+    node_type: str
+    parent_slug: str | None = None
+    status: str
+    top_terms: list[str] = []
+    confidence: float = 0.0
+    source_evidence_count: int = 0
+    children: list["KbNodeSummary"] = []
+
+
+class KbEvidenceItem(BaseModel):
+    """A single evidence link backing a KB node."""
+
+    id: str
+    transcript_id: str | None = None
+    project_id: str | None = None
+    excerpt: str | None = None
+    evidence_type: str
+    outcome: str | None = None
+    confidence: float | None = None
+    created_at: datetime
+
+
+class KbNodeDetail(BaseModel):
+    """Full KB node including summary + evidence links."""
+
+    slug: str
+    title: str
+    node_type: str
+    parent_slug: str | None = None
+    status: str
+    summary: str | None = None
+    top_terms: list[str] = []
+    confidence: float = 0.0
+    source_evidence_count: int = 0
+    mechanical_key: str | None = None
+    updated_at: datetime
+    evidence: list[KbEvidenceItem] = []
+    children: list["KbNodeDetail"] = []
+
+
+class KbTreeResponse(BaseModel):
+    """Root-level response wrapping the full KB tree."""
+
+    nodes: list[KbNodeSummary]
+    total_nodes: int
+    total_published: int
+
+
+class KbEntitySummary(BaseModel):
+    """Lightweight entity for the index list."""
+
+    id: str
+    canonical_name: str
+    entity_type: str
+    description: str | None = None
+    mention_count: int
+    aliases: list[str] = []
+
+
+class KbEntityListResponse(BaseModel):
+    """Paginated list of KB entities."""
+
+    entities: list[KbEntitySummary]
+    total: int
+
+
+class KbEntityMentionItem(BaseModel):
+    """A single occurrence of an entity in the corpus."""
+
+    id: str
+    transcript_id: str | None = None
+    project_id: str | None = None
+    node_slug: str | None = None
+    context_excerpt: str | None = None
+    outcome: str | None = None
+    first_seen_at: datetime | None = None
+    last_seen_at: datetime | None = None
+
+
+class KbEntityDetail(BaseModel):
+    """Full entity detail with mention timeline."""
+
+    id: str
+    canonical_name: str
+    entity_type: str
+    description: str | None = None
+    how_used: str | None = None
+    why_used: str | None = None
+    mention_count: int
+    aliases: list[str] = []
+    mentions: list[KbEntityMentionItem] = []
+
+
+KbNodeSummary.model_rebuild()
+KbNodeDetail.model_rebuild()

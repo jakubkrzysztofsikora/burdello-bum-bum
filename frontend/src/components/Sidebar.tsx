@@ -8,6 +8,7 @@ import {
   Search,
   Upload,
   Settings,
+  Library,
 } from "lucide-react";
 import { useAppStore } from "../stores/useAppStore";
 
@@ -17,6 +18,7 @@ const LINKS = [
   { to: "/tasks", label: "Tasks", icon: CheckSquare },
   { to: "/artifacts", label: "Artifacts", icon: Layers },
   { to: "/transcripts", label: "Transcripts", icon: FileText },
+  { to: "/knowledge", label: "Knowledge Base", icon: Library },
   { to: "/search", label: "Search", icon: Search },
   { to: "/todoist", label: "Todoist Sync", icon: Upload },
   { to: "/settings", label: "Settings", icon: Settings },

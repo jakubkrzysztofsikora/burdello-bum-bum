@@ -11,6 +11,9 @@ import { TranscriptDetail } from "./pages/TranscriptDetail";
 import { Search } from "./pages/Search";
 import { TodoistExport } from "./pages/TodoistExport";
 import { Settings } from "./pages/Settings";
+import { Knowledge } from "./pages/Knowledge";
+import { KbPage } from "./pages/KbPage";
+import { KbEntity } from "./pages/KbEntity";
 
 function App() {
   return (
@@ -27,6 +30,9 @@ function App() {
         <Route path="/search" element={<Search />} />
         <Route path="/todoist" element={<TodoistExport />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/knowledge" element={<Knowledge />} />
+        <Route path="/knowledge/entity/:slug" element={<KbEntity />} />
+        <Route path="/knowledge/:slug" element={<KbPage />} />
       </Route>
     </Routes>
   );

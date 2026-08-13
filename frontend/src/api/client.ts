@@ -17,6 +17,10 @@ import type {
   TodoistSyncPlanResponse,
   TodoistSyncRunDetail,
   TodoistSyncRunListResponse,
+  KbTreeResponse,
+  KbNodeDetail,
+  KbEntityListResponse,
+  KbEntityDetail,
 } from "./types";
 
 const API_BASE = "api/v1";
@@ -180,6 +184,24 @@ export const api = {
     fetchJson(`${API_BASE}/todoist/export/project/${projectId}?include_done=${includeDone}`, {
       method: "POST",
     }),
+
+  // Knowledge Base
+  getKbTree: (): Promise<KbTreeResponse> =>
+    fetchJson(`${API_BASE}/kb/tree`),
+  getKbNode: (slug: string): Promise<KbNodeDetail> =>
+    fetchJson(`${API_BASE}/kb/nodes/${encodeURIComponent(slug)}`),
+  listKbEntities: (
+    params: { entity_type?: string; limit?: number; offset?: number } = {},
+  ): Promise<KbEntityListResponse> => {
+    const search = new URLSearchParams();
+    if (params.entity_type) search.set("entity_type", params.entity_type);
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.offset !== undefined) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return fetchJson(`${API_BASE}/kb/entities/${qs ? `?${qs}` : ""}`);
+  },
+  getKbEntity: (slug: string): Promise<KbEntityDetail> =>
+    fetchJson(`${API_BASE}/kb/entities/${encodeURIComponent(slug)}`),
 
   // Mining
   getMiningResults: (transcriptId: string): Promise<MiningResult[]> =>
