@@ -123,8 +123,8 @@ cluster-nfs/pv`).
 2. ✅ Extraction prompt + Celery task — `ce19ce3`
 3. ✅ Clustering + RAPTOR hierarchy + draft generation — `5e8a7d0`
 4. ✅ Frontend tree + node pages + entity index — `d6ca48e`
-5. 🔄 QA two-stage retrieval + incremental assignment + k3s manifests
-6. ⏳ MCP tools (kb_tree, kb_page_read, kb_entity_lookup)
+5. ✅ QA two-stage retrieval + incremental + k3s manifests — `0d56272` (review-fix `82f03a2`)
+6. ✅ MCP tools — `d576378`
 
 ## Phase 5 detail (current)
 
