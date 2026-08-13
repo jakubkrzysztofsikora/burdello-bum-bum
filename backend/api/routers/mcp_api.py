@@ -23,6 +23,9 @@ from backend.mcp_tools import (
     create_bookmark,
     get_kanban_board,
     get_stats,
+    kb_entity_lookup,
+    kb_page_read,
+    kb_tree,
     list_artifacts,
     list_bookmarks,
     list_projects,
@@ -196,4 +199,49 @@ async def call_list_bookmarks(
         project_id=body.get("project_id"),
         cwd=body.get("cwd"),
         limit=int(body.get("limit", 50)),
+    )
+
+
+@router.post("/kb_tree", dependencies=[Depends(_require_bearer)])
+async def call_kb_tree(
+    body: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    return await kb_tree(
+        db,
+        root_slug=body.get("root_slug"),
+        max_depth=int(body.get("max_depth", 4)),
+        include_drafts=bool(body.get("include_drafts", False)),
+    )
+
+
+@router.post("/kb_page_read", dependencies=[Depends(_require_bearer)])
+async def call_kb_page_read(
+    body: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    slug = body.get("slug")
+    if not slug:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="slug is required",
+        )
+    return await kb_page_read(db, slug=slug)
+
+
+@router.post("/kb_entity_lookup", dependencies=[Depends(_require_bearer)])
+async def call_kb_entity_lookup(
+    body: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    name = body.get("name")
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="name is required",
+        )
+    return await kb_entity_lookup(
+        db,
+        name=name,
+        limit_mentions=int(body.get("limit_mentions", 20)),
     )

@@ -22,7 +22,17 @@ from sqlalchemy import case, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.models import Artifact, Bookmark, Project, Task, Transcript
+from backend.core.models import (
+    Artifact,
+    Bookmark,
+    KbEntity,
+    KbEntityMention,
+    KbNode,
+    KbNodeSource,
+    Project,
+    Task,
+    Transcript,
+)
 from backend.pipeline.bookmark_linker import link_bookmarks_for_session
 from backend.pipeline.repo_resolver import resolve_from_cwd, resolve_from_path
 from backend.pipeline.tasks import process_source
@@ -541,4 +551,249 @@ def _task_summary(t: Task) -> dict[str, Any]:
         "tags": t.tags or [],
         "pinned": t.pinned,
         "created_at": t.created_at.isoformat() if t.created_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Base
+# ---------------------------------------------------------------------------
+
+
+_KB_TREE_MAX_DEPTH = 4
+
+
+def _kb_node_summary(node: KbNode) -> dict[str, Any]:
+    """Render one ``KbNode`` for tree-style responses."""
+    return {
+        "slug": node.slug,
+        "title": node.title,
+        "node_type": node.node_type,
+        "parent_slug": node.parent.slug if node.parent else None,
+        "status": node.status,
+        "top_terms": list(node.top_terms or []),
+        "confidence": float(node.confidence or 0.0),
+        "source_evidence_count": node.source_evidence_count,
+    }
+
+
+async def kb_tree(
+    db: AsyncSession,
+    *,
+    root_slug: str | None = None,
+    max_depth: int = _KB_TREE_MAX_DEPTH,
+    include_drafts: bool = False,
+) -> dict[str, Any]:
+    """Return the KB tree, optionally rooted at one category.
+
+    Args:
+        db: Async SQLAlchemy session.
+        root_slug: Optional slug of a category node to start from. When
+            ``None``, every published root category is returned.
+        max_depth: Maximum recursion depth (root = 0). Cap at 4.
+        include_drafts: When ``True``, draft (not-yet-published) nodes
+            are included in the response.
+
+    Returns:
+        Dict with ``nodes`` (nested list) and ``total`` count.
+    """
+    depth_cap = max(0, min(max_depth, _KB_TREE_MAX_DEPTH))
+    statuses = {"published", "draft"} if include_drafts else {"published"}
+
+    base_filter = KbNode.status.in_(statuses)
+    if root_slug:
+        base_filter = base_filter & (KbNode.slug == root_slug)
+
+    rows = (
+        await db.execute(
+            select(KbNode)
+            .where(base_filter)
+            .order_by(KbNode.node_type.desc(), KbNode.slug.asc())
+        )
+    ).scalars().all()
+
+    if not rows:
+        return {"nodes": [], "total": 0}
+
+    slug_to_parent: dict[str, str | None] = {}
+    for row in rows:
+        slug_to_parent[row.slug] = row.parent.slug if row.parent else None
+
+    node_map: dict[str, dict[str, Any]] = {
+        row.slug: _kb_node_summary(row) for row in rows
+    }
+    for slug in node_map:
+        node_map[slug]["children"] = []
+
+    roots: list[dict[str, Any]] = []
+    for row in rows:
+        parent_slug = slug_to_parent.get(row.slug)
+        if parent_slug is None:
+            roots.append(node_map[row.slug])
+        else:
+            node_map[parent_slug]["children"].append(node_map[row.slug])
+
+    def _truncate(node: dict[str, Any], depth: int) -> dict[str, Any]:
+        if depth >= depth_cap:
+            node["children"] = []
+            return node
+        node["children"] = [
+            _truncate(child, depth + 1) for child in node["children"]
+        ]
+        return node
+
+    trimmed = [_truncate(r, 0) for r in roots]
+    return {"nodes": trimmed, "total": len(rows)}
+
+
+async def kb_page_read(
+    db: AsyncSession,
+    slug: str,
+) -> dict[str, Any]:
+    """Return one KB page with its evidence and child pages.
+
+    Args:
+        db: Async SQLAlchemy session.
+        slug: Node slug to read.
+
+    Returns:
+        Dict with ``node``, ``evidence`` (up to 25 items), and
+        ``children`` (immediate sub-nodes). Empty ``node`` dict when
+        the slug does not resolve.
+    """
+    node = (
+        await db.execute(
+            select(KbNode).where(KbNode.slug == slug)
+        )
+    ).scalar_one_or_none()
+    if node is None:
+        return {"node": {}, "evidence": [], "children": []}
+
+    evidence_rows = (
+        await db.execute(
+            select(KbNodeSource)
+            .where(KbNodeSource.node_id == node.id)
+            .order_by(KbNodeSource.created_at.desc())
+            .limit(25)
+        )
+    ).scalars().all()
+
+    child_rows = (
+        await db.execute(
+            select(KbNode)
+            .where(KbNode.parent_id == node.id)
+            .order_by(KbNode.slug.asc())
+        )
+    ).scalars().all()
+
+    node_payload = _kb_node_summary(node)
+    node_payload.update(
+        {
+            "summary": node.summary,
+            "mechanical_key": node.mechanical_key,
+            "updated_at": node.updated_at.isoformat() if node.updated_at else None,
+        }
+    )
+
+    return {
+        "node": node_payload,
+        "evidence": [
+            {
+                "id": str(e.id),
+                "transcript_id": str(e.transcript_id) if e.transcript_id else None,
+                "project_id": str(e.project_id) if e.project_id else None,
+                "excerpt": e.excerpt,
+                "outcome": e.outcome,
+                "evidence_type": e.evidence_type,
+                "confidence": e.confidence,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in evidence_rows
+        ],
+        "children": [_kb_node_summary(c) for c in child_rows],
+    }
+
+
+async def kb_entity_lookup(
+    db: AsyncSession,
+    name: str,
+    *,
+    limit_mentions: int = 20,
+) -> dict[str, Any]:
+    """Look up a KB entity by canonical name or alias.
+
+    Args:
+        db: Async SQLAlchemy session.
+        name: Canonical name or alias to search for (case-insensitive).
+        limit_mentions: Maximum mention rows to return.
+
+    Returns:
+        Dict with ``entity`` and ``mentions``. Empty ``entity`` dict
+        when nothing matches.
+    """
+    name_lc = name.strip().lower()
+    if not name_lc:
+        return {"entity": {}, "mentions": []}
+
+    # Canonical-name match first; fall back to alias overlap with
+    # case-insensitive comparison via a per-row EXISTS subquery.
+    entity = (
+        await db.execute(
+            select(KbEntity).where(
+                func.lower(KbEntity.canonical_name) == name_lc
+            )
+        )
+    ).scalar_one_or_none()
+    if entity is None:
+        entity = (
+            await db.execute(
+                select(KbEntity).where(
+                    KbEntity.aliases.isnot(None),
+                    func.exists(
+                        select(1)
+                        .where(
+                            func.lower(
+                                func.unnest(KbEntity.aliases)
+                            )
+                            == name_lc
+                        )
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+
+    if entity is None:
+        return {"entity": {}, "mentions": []}
+
+    mentions = (
+        await db.execute(
+            select(KbEntityMention)
+            .where(KbEntityMention.entity_id == entity.id)
+            .order_by(KbEntityMention.first_seen_at.desc().nullslast())
+            .limit(limit_mentions)
+        )
+    ).scalars().all()
+
+    return {
+        "entity": {
+            "id": str(entity.id),
+            "canonical_name": entity.canonical_name,
+            "entity_type": entity.entity_type,
+            "description": entity.description,
+            "how_used": entity.how_used,
+            "why_used": entity.why_used,
+            "mention_count": entity.mention_count,
+            "aliases": list(entity.aliases or []),
+        },
+        "mentions": [
+            {
+                "id": str(m.id),
+                "transcript_id": str(m.transcript_id) if m.transcript_id else None,
+                "project_id": str(m.project_id) if m.project_id else None,
+                "context_excerpt": m.context_excerpt,
+                "outcome": m.outcome,
+                "first_seen_at": m.first_seen_at.isoformat() if m.first_seen_at else None,
+                "last_seen_at": m.last_seen_at.isoformat() if m.last_seen_at else None,
+            }
+            for m in mentions
+        ],
     }

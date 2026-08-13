@@ -198,5 +198,54 @@ async def list_bookmarks(
     )
 
 
+@mcp.tool()
+async def kb_tree(
+    root_slug: str | None = None,
+    max_depth: int = 4,
+    include_drafts: bool = False,
+) -> dict[str, Any]:
+    """Return the curated knowledge-base tree.
+
+    Defaults to published nodes only; pass ``include_drafts=True`` to see
+    pending pages. ``root_slug`` scopes the response to a single
+    category (e.g. ``architecture``). ``max_depth`` caps recursion at 4.
+    """
+    return await _call(
+        "/kb_tree",
+        {
+            "root_slug": root_slug,
+            "max_depth": max_depth,
+            "include_drafts": include_drafts,
+        },
+    )
+
+
+@mcp.tool()
+async def kb_page_read(slug: str) -> dict[str, Any]:
+    """Read one KB page: summary, top terms, evidence links, children.
+
+    Use ``kb_tree`` first to find the slug; this returns the curated
+    content plus up to 25 evidence cards linking to source transcripts
+    and projects. Falls back to empty ``node`` when the slug is unknown.
+    """
+    return await _call("/kb_page_read", {"slug": slug})
+
+
+@mcp.tool()
+async def kb_entity_lookup(name: str, limit_mentions: int = 20) -> dict[str, Any]:
+    """Look up a KB entity by canonical name or alias (case-insensitive).
+
+    Returns the entity's description + how/why it's used + a mention
+    timeline (transcripts + projects + outcome badges). Use when you
+    want to recall prior context about a tool, library, framework,
+    pattern, technique, or concept before deciding how to approach
+    a similar problem.
+    """
+    return await _call(
+        "/kb_entity_lookup",
+        {"name": name, "limit_mentions": limit_mentions},
+    )
+
+
 if __name__ == "__main__":
     mcp.run()
