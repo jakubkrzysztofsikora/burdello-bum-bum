@@ -8,11 +8,12 @@ data:
   QDRANT_URL: "http://qdrant.burdello.svc.cluster.local:6333"
   REDIS_URL: "redis://redis.burdello.svc.cluster.local:6379/0"
   CELERY_BROKER_URL: "redis://redis.burdello.svc.cluster.local:6379/1"
-  DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres.burdello.svc.cluster.local:5432/burdello"
   BB_CHUNK_SIZE: "1500"
   BB_EMBEDDING_MODEL: "nomic-ai/nomic-embed-text-v2-moe"
   QDRANT_COLLECTION: "burdello_chunks"
   BB_QA_MODEL: "deepseek-v4-flash"
   BB_MINING_MODEL: "gpt-4o-mini"
   BB_KB_MODEL: "deepseek-v4-flash"
-  VITE_API_BASE: "/api/v1"
+  # DATABASE_URL lives in the burdello-secrets Secret — it's injected
+  # per-container below via env.valueFrom.secretKeyRef so the password
+  # never appears in a ConfigMap (which is world-readable in the ns).

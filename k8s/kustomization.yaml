@@ -6,7 +6,6 @@ resources:
   - configmap.yaml
   - secrets.yaml
   - ts-funnel-config.yaml
-  - frontend-nginx.yaml
   - postgres.yaml
   - qdrant.yaml
   - redis.yaml

@@ -903,11 +903,13 @@ def knowledge_extract_task(
 def kb_incremental_assign_chain_task(
     self, knowledge_result: dict[str, Any]
 ) -> dict[str, Any]:
-    """Thin wrapper around ``kb_incremental_assign_task`` for chain wiring.
+    """Chain wiring for ``kb_incremental_assign_task``.
 
-    Kept as a distinct task so the chain signature stays stable when the
-    underlying implementation evolves. Forwards the knowledge result and
-    its own return value unchanged.
+    Celery chains invoke each task as a separate worker job. To keep the
+    pipeline flat (one task in the chain, no nested ``.apply().get()``),
+    we delegate synchronously here. Returning the inner task's result
+    means the chain's final return value matches the next-stage signature
+    without re-dispatching to a second worker slot.
 
     Args:
         knowledge_result: Output of ``knowledge_extract_task``.
@@ -915,11 +917,11 @@ def kb_incremental_assign_chain_task(
     Returns:
         Output of ``kb_incremental_assign_task``.
     """
-    from backend.knowledge.incremental import kb_incremental_assign_task
+    from backend.knowledge.incremental import (
+        kb_incremental_assign_task as _impl,
+    )
 
-    return kb_incremental_assign_task.apply(
-        args=[knowledge_result]
-    ).get()
+    return _impl.run(knowledge_result)
 
 
 # ---------------------------------------------------------------------------

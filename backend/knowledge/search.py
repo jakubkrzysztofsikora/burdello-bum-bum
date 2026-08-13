@@ -91,25 +91,3 @@ async def search_kb_nodes(
 
     scored.sort(key=lambda h: h.score, reverse=True)
     return scored[:top_k]
-
-
-def format_kb_context(hits: list[KbHit]) -> str:
-    """Render KB hits as a delimited, injection-safe context block.
-
-    Args:
-        hits: Ranked KB hits.
-
-    Returns:
-        Plain-text block ready to embed in a prompt.
-    """
-    if not hits:
-        return ""
-    chunks: list[str] = []
-    for idx, hit in enumerate(hits, start=1):
-        terms = ", ".join(hit.top_terms[:8])
-        body = hit.summary or f"(no summary; terms: {terms})"
-        chunks.append(
-            f"[KB-{idx}] {hit.title} (slug={hit.slug}, score={hit.score:.2f})\n"
-            f"{body}"
-        )
-    return "\n\n".join(chunks)

@@ -33,7 +33,8 @@ docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
 
 FE=forgejo.tail5d39b4.ts.net/jakub/burdello-bum-bum-frontend
 docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
-  -f frontend/Dockerfile.k8s --tag "$FE:latest" --push frontend/
+  -f frontend/Dockerfile.k8s \
+  --tag "$FE:$(git rev-parse --short HEAD)" --tag "$FE:latest" --push frontend/
 ```
 
 ## Pre-flight
@@ -57,8 +58,8 @@ kubectl -n burdello create secret generic ts-sidecar-auth \
   --from-literal=TS_AUTHKEY="$TS_AUTHKEY_BURDELLO"
 
 kubectl -n burdello create secret generic burdello-secrets \
+  --from-literal=DATABASE_URL="postgresql+asyncpg://bbuser:${BB_DB_PW}@postgres.burdello.svc.cluster.local:5432/burdello" \
   --from-literal=POSTGRES_PASSWORD="$BB_DB_PW" \
-  --from-literal=DATABASE_PASSWORD="$BB_DB_PW" \
   --from-literal=LITELLM_API_KEY="$LITELLM_KEY"
 ```
 

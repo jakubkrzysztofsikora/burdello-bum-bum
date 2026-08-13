@@ -30,11 +30,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: burdello-env
-            - secretRef:
-                name: burdello-secrets
           env:
             - name: DATABASE_URL
-              value: "postgresql+asyncpg://bbuser:$(DATABASE_PASSWORD)@postgres.burdello.svc.cluster.local:5432/burdello"
+              valueFrom:
+                secretKeyRef:
+                  name: burdello-secrets
+                  key: DATABASE_URL
             - name: LITELLM_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -79,11 +80,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: burdello-env
-            - secretRef:
-                name: burdello-secrets
           env:
             - name: DATABASE_URL
-              value: "postgresql+asyncpg://bbuser:$(DATABASE_PASSWORD)@postgres.burdello.svc.cluster.local:5432/burdello"
+              valueFrom:
+                secretKeyRef:
+                  name: burdello-secrets
+                  key: DATABASE_URL
             - name: LITELLM_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -125,11 +127,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: burdello-env
-            - secretRef:
-                name: burdello-secrets
           env:
             - name: DATABASE_URL
-              value: "postgresql+asyncpg://bbuser:$(DATABASE_PASSWORD)@postgres.burdello.svc.cluster.local:5432/burdello"
+              valueFrom:
+                secretKeyRef:
+                  name: burdello-secrets
+                  key: DATABASE_URL
             - name: LITELLM_API_KEY
               valueFrom:
                 secretKeyRef:

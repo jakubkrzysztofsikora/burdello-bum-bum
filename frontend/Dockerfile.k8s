@@ -1,0 +1,35 @@
+# =============================================================================
+# Burdello Bum-Bum frontend — production image (vite build → nginx)
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Stage 1: Builder — install deps + run `vite build`
+# ---------------------------------------------------------------------------
+FROM node:20-alpine AS builder
+
+WORKDIR /build
+
+# Install deps with a clean cache layer.
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+# Build the static bundle. Runtime routing is handled by nginx (see
+# nginx.k8s.conf), which reverse-proxies /api/* to the backend
+# container on the same pod — no VITE_API_BASE needed at build time.
+COPY . ./
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+# Stage 2: Runtime — nginx serving the bundle, /api reverse-proxied
+# ---------------------------------------------------------------------------
+FROM nginx:1.27-alpine
+
+# Static bundle.
+COPY --from=builder /build/dist /usr/share/nginx/html
+
+# nginx config with /api/* reverse-proxied to backend on the same pod.
+COPY nginx.k8s.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 3000
+
+CMD ["nginx", "-g", "daemon off;"]

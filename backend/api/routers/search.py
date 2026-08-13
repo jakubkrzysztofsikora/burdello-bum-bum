@@ -11,6 +11,8 @@ import os
 import uuid
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +21,7 @@ from backend.core.config import get_settings
 from backend.core.database import get_db
 from backend.core.models import Project, Source, Task, Transcript
 from backend.core.schemas import QACitation, QARequest, QAResponse, SearchRequest, SearchResponse
-from backend.knowledge.search import format_kb_context, search_kb_nodes
+from backend.knowledge.search import search_kb_nodes
 from backend.pipeline.embedding import EmbeddingEngine
 from backend.search.engine import HybridSearchEngine
 
@@ -125,7 +127,6 @@ async def qa(
             min_score=0.35,
         )
     except Exception as exc:
-        logger = logging.getLogger(__name__)
         logger.warning("qa: KB stage failed (continuing without): %s", exc)
         kb_hits = []
 
