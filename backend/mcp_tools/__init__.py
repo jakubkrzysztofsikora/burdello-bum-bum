@@ -19,6 +19,7 @@ from typing import Any
 
 from kombu.exceptions import OperationalError
 from sqlalchemy import case, desc, func, or_, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -606,6 +607,7 @@ async def kb_tree(
     rows = (
         await db.execute(
             select(KbNode)
+            .options(selectinload(KbNode.parent))
             .where(base_filter)
             .order_by(KbNode.node_type.desc(), KbNode.slug.asc())
         )
@@ -736,30 +738,31 @@ async def kb_entity_lookup(
 
     # Canonical-name match first; fall back to alias overlap with
     # case-insensitive comparison via a per-row EXISTS subquery.
+    # ``select(...).exists()`` emits ``EXISTS (SELECT 1 ... FROM unnest(...))``
+    # which Postgres evaluates against the outer kb_entities row.
     entity = (
         await db.execute(
             select(KbEntity).where(
                 func.lower(KbEntity.canonical_name) == name_lc
             )
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
     if entity is None:
         entity = (
             await db.execute(
-                select(KbEntity).where(
+                select(KbEntity)
+                .where(
                     KbEntity.aliases.isnot(None),
-                    func.exists(
-                        select(1)
-                        .where(
-                            func.lower(
-                                func.unnest(KbEntity.aliases)
-                            )
-                            == name_lc
-                        )
-                    ),
+                    select(
+                        func.lower(func.unnest(KbEntity.aliases))
+                    )
+                    .where(
+                        func.lower(func.unnest(KbEntity.aliases)) == name_lc
+                    )
+                    .exists(),
                 )
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
 
     if entity is None:
         return {"entity": {}, "mentions": []}
