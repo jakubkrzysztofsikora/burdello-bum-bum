@@ -11,7 +11,9 @@ Burdello Bum-Bum ("BB") is a **local-first** web application that:
 - **Ingests** session transcripts from Claude Code, Kimi CLI, Vibe CLI, Codex CLI, Agy, Aider, and generic formats
 - **Processes** transcripts into vectorized, searchable data via semantic chunking + embeddings
 - **Mines** projects, tasks, threads, artifacts, and statuses using LLM-powered extraction
+- **Mines** reusable engineering knowledge (tools, patterns, techniques, solved problems) and assembles a **hierarchical Knowledge Base** with curated pages and a full keyword/tool index
 - **Searches** across everything with hybrid search (full-text + vector + metadata filters)
+- **Searches** the Knowledge Base alongside transcript chunks via a two-stage QA pipeline
 - **Displays** data hierarchically (Project > Task > Thread) with multiple detail levels
 - **Syncs** to Todoist for project/task synchronization
 
@@ -148,6 +150,19 @@ The system will:
 - **Artifact Detection**: Identifies files, configs, and code generated
 - **Missing Elements**: Finds TODOs, incomplete work, and forgotten threads
 - **Abandoned Work Detection**: Flags old transcripts with no recent follow-up
+- **Knowledge Atom Extraction**: Mines reusable engineering knowledge (tools, libraries, patterns, techniques, decisions, solved problems) into structured atoms that feed the Knowledge Base
+
+### Knowledge Base
+
+A curated, hierarchical knowledge layer mined from transcripts:
+
+- **Tree**: 10 seed roots (Architecture, Testing, Debugging, DevOps, Performance, Cybersecurity, Tooling, Workflow, Integrations, AI Engineering) with discovered subtopics. Browse at `/knowledge`.
+- **Curated Pages**: Each leaf summarises a recurring engineering pattern with a markdown summary, key terms, and evidence cards linking back to source transcripts + projects.
+- **Entity Index**: Full keyword/tool/pattern/technique/concept index at `/knowledge/index`, filterable by type, with mention timelines and outcome badges.
+- **Auto-publish Gate**: Nodes with two or more corroborating transcripts auto-promote from `draft` to `published`; single-source pages stay `draft` until human review.
+- **QA Integration**: The `/api/v1/search/qa` endpoint retrieves KB pages (by embedding cosine) as a first stage, then falls through to transcript chunks. KB citations surface separately.
+- **Periodic Rebuild**: `kb_cluster_task` runs weekly via Celery beat, re-clustering atoms with stable content-derived slugs (mechanical-key dedup keeps human-published nodes intact).
+- **MCP Surface**: Agents can call `kb_tree`, `kb_page_read`, `kb_entity_lookup` via stdio MCP server (Claude Code) or the `/api/v1/mcp/*` Cloudflare Worker bridge (Claude.ai).
 
 ### Display Levels
 
@@ -156,7 +171,8 @@ The system will:
 - **Project Detail**: Tasks (Kanban), transcripts, artifacts, missing elements
 - **Tasks**: Kanban board (Todo / In Progress / Completed / Abandoned)
 - **Transcripts**: Full conversation viewer with tool call highlighting
-- **Search**: Advanced search with filters and similarity matching
+- **Knowledge Base**: Hierarchical tree + entity index of curated engineering knowledge mined from transcripts
+- **Search**: Advanced search with filters and similarity matching; QA answers cite KB pages + transcript chunks
 
 ### Todoist Sync
 
@@ -215,7 +231,20 @@ GET    /api/v1/todoist/sync/runs/{run_id}      Get a sync run
 POST   /api/v1/todoist/export/project/{id}     Compatibility wrapper
 POST   /api/v1/todoist/export/task/{id}        Export task
 GET    /api/v1/todoist/sync-status             Sync status
+
+GET    /api/v1/kb/tree                        KB tree (nested)
+GET    /api/v1/kb/nodes/{slug}                KB page detail + evidence + children
+GET    /api/v1/kb/entities                    Entity index (filter: entity_type)
+GET    /api/v1/kb/entities/{slug}             Entity detail + mention timeline
 ```
+
+### MCP tools
+
+| Tool | Purpose |
+|---|---|
+| `kb_tree` | Return the KB tree (optionally rooted at one category) |
+| `kb_page_read` | Read a single KB page with evidence + children |
+| `kb_entity_lookup` | Find an entity by name/alias with mention timeline |
 
 ## Development
 
@@ -237,10 +266,19 @@ burdello-bum-bum/
 │   │   ├── normalization.py  # Transcript normalization
 │   │   ├── storage.py        # DB + vector store storage
 │   │   ├── discovery.py      # Source file discovery
+│   │   ├── celery_app.py     # Celery app + beat schedule
 │   │   └── tasks.py          # Celery task definitions
 │   ├── mining/               # LLM data mining
 │   │   ├── engine.py         # MiningEngine
-│   │   └── prompts/          # LLM prompt templates
+│   │   └── prompts/          # LLM prompt templates (incl. knowledge_extraction)
+│   ├── knowledge/            # Knowledge Base — atom extraction + clustering
+│   │   ├── seeds.py          # 10 root categories
+│   │   ├── clusterer.py      # Agglomerative cosine + c-TF-IDF
+│   │   ├── hierarchy.py      # RAPTOR-style tree assembly
+│   │   ├── draft_generator.py # LLM-generated page summaries
+│   │   ├── incremental.py    # Per-transcript atom assignment
+│   │   ├── search.py         # KB cosine search over KbNode embeddings
+│   │   └── task.py           # kb_cluster_task (periodic rebuild)
 │   ├── search/               # Search engine
 │   │   ├── engine.py         # HybridSearchEngine (Qdrant)
 │   │   ├── vector.py         # Embedding utilities
@@ -248,13 +286,29 @@ burdello-bum-bum/
 │   ├── integrations/         # External integrations
 │   │   ├── todoist.py        # Todoist REST API client
 │   │   └── litellm.py        # LiteLLM gateway client
+│   ├── mcp_tools/            # MCP tool implementations (kb_tree, kb_page_read, …)
 │   └── tests/                # Comprehensive test suite
 ├── frontend/                 # React SPA
-│   ├── src/components/       # Reusable UI components
-│   ├── src/pages/            # Page components
+│   ├── src/components/       # Reusable UI components (incl. KbTreeView)
+│   ├── src/pages/            # Page components (incl. Knowledge, KbPage, KbEntity)
+│   ├── src/api/              # TypeScript API client
 │   ├── src/hooks/            # React Query hooks
-│   └── src/stores/           # Zustand state management
-├── docker-compose.yml        # Full stack deployment
+│   ├── src/stores/           # Zustand state management
+│   ├── Dockerfile.k8s        # Multi-stage vite build → nginx image
+│   └── nginx.k8s.conf        # SPA + /api reverse-proxy config
+├── k8s/                      # Production manifests for the homelab k3s cluster
+│   ├── README.md             # Bring-up + update instructions
+│   ├── namespace.yaml
+│   ├── configmap.yaml
+│   ├── secrets.yaml          # DATABASE_URL etc. injected out-of-band
+│   ├── ts-funnel-config.yaml
+│   ├── postgres.yaml         # StatefulSet on nfs-studio
+│   ├── qdrant.yaml           # Deployment on nfs-studio
+│   ├── redis.yaml            # Deployment on nfs-studio
+│   ├── backend.yaml          # FastAPI + frontend + ts-funnel sidecar
+│   ├── celery.yaml           # worker / mining / beat
+│   └── kustomization.yaml
+├── docker-compose.yml        # Local stack (offline dev)
 ├── Dockerfile                # Backend container
 └── pyproject.toml            # Python dependencies
 ```
@@ -289,6 +343,10 @@ npm test
 | `BB_EMBEDDING_MODEL` | `nomic-embed-text-v2` | Embedding model |
 | `BB_CHUNK_SIZE` | `512` | Max chunk size (tokens) |
 | `BB_CHUNK_OVERLAP` | `50` | Chunk overlap |
+| `BB_QA_MODEL` | `deepseek-v4-flash` | Model for QA synthesis |
+| `BB_MINING_MODEL` | `gpt-4o-mini` | Model for project / task / artifact / status mining |
+| `BB_KB_MODEL` | `deepseek-v4-flash` | Model for KB page summaries (falls back to `BB_QA_MODEL`) |
+| `MCP_BRIDGE_TOKEN` | `` | Bearer token required for `/api/v1/mcp/*` endpoints |
 | `TODOIST_API_TOKEN` | `` | Todoist API token |
 
 ## Maintenance
@@ -340,6 +398,30 @@ tailscale serve --https 443 --set-path /api http://localhost:8000
 ```
 
 Now your instance is available at `https://your-machine.your-tailnet.ts.net`.
+
+## Homelab k3s Deployment (production)
+
+For always-on hosting, the `k8s/` directory holds full manifests for the
+homelab k3s cluster (single node on the Mac-mini host). Data lives on the
+external drive via the `nfs-studio` StorageClass; the public URL is served
+through a Tailscale Funnel sidecar at `https://burdello.tail5d39b4.ts.net`.
+
+```bash
+# Build & push both images (amd64, no provenance/sbom)
+docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+  --tag forgejo.tail5d39b4.ts.net/jakub/burdello-bum-bum:latest --push .
+
+docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+  -f frontend/Dockerfile.k8s \
+  --tag forgejo.tail5d39b4.ts.net/jakub/burdello-bum-bum-frontend:latest --push frontend/
+
+# Create namespace + secrets (DATABASE_URL, POSTGRES_PASSWORD, LITELLM_API_KEY,
+# ts-sidecar-auth, forgejo-registry) — see k8s/README.md for full steps.
+
+kubectl apply -k k8s/
+```
+
+Full bring-up, update, and rollback instructions: see `k8s/README.md`.
 
 ## License
 

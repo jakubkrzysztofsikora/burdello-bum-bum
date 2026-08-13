@@ -1,5 +1,8 @@
 # React + TypeScript + Vite
 
+Frontend for Burdello Bum-Bum. See the repo root README for the project
+overview; this file documents the local Vite scaffold.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
