@@ -163,6 +163,7 @@ A curated, hierarchical knowledge layer mined from transcripts:
 - **QA Integration**: The `/api/v1/search/qa` endpoint retrieves KB pages (by embedding cosine) as a first stage, then falls through to transcript chunks. KB citations surface separately.
 - **Periodic Rebuild**: `kb_cluster_task` runs weekly via Celery beat, re-clustering atoms with stable content-derived slugs (mechanical-key dedup keeps human-published nodes intact).
 - **MCP Surface**: Agents can call `kb_tree`, `kb_page_read`, `kb_entity_lookup` via stdio MCP server (Claude Code) or the `/api/v1/mcp/*` Cloudflare Worker bridge (Claude.ai).
+- **First-time backfill**: For existing transcripts that pre-date the KB feature, run `python -m backend.scripts.build_kb --apply` (preview with `--dry-run`). The script extracts atoms per transcript then triggers `kb_cluster_task` synchronously.
 
 ### Display Levels
 

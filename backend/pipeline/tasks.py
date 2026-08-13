@@ -921,7 +921,10 @@ def kb_incremental_assign_chain_task(
         kb_incremental_assign_task as _impl,
     )
 
-    return _impl.run(knowledge_result)
+    # _impl is bound (bind=True); ``task.apply()`` runs eagerly with the
+    # correct self binding, unlike ``task.run(knowledge_result)`` which
+    # would set self=<dict> and drop the arg.
+    return _impl.apply(args=[knowledge_result]).get()
 
 
 # ---------------------------------------------------------------------------

@@ -96,6 +96,36 @@ kubectl -n burdello exec -it deploy/celery-mining -- \
   celery -A backend.pipeline.celery_app.celery_app call backend.knowledge.task.kb_cluster_task
 ```
 
+## First-time backfill
+
+Existing transcripts that pre-date the KB feature won't have
+``MiningResult(miner_type='knowledge')`` rows. The mining chain only runs
+the KB extraction for new transcripts. To backfill the whole corpus in
+one shot:
+
+```bash
+# Preview (no writes, no clustering)
+kubectl -n burdello exec -it deploy/celery-mining -- \
+  python -m backend.scripts.build_kb --dry-run
+
+# Run it
+kubectl -n burdello exec -it deploy/celery-mining -- \
+  python -m backend.scripts.build_kb --apply
+
+# Smoke run on the 5 most-recent transcripts
+kubectl -n burdello exec -it deploy/celery-mining -- \
+  python -m backend.scripts.build_kb --apply --limit 5
+
+# Just rebuild the tree from atoms that already exist (skip backfill)
+kubectl -n burdello exec -it deploy/celery-mining -- \
+  python -m backend.scripts.build_kb --apply --only-cluster
+```
+
+The script runs the LLM knowledge extraction for every completed
+transcript without an existing knowledge MiningResult, then triggers
+``kb_cluster_task`` synchronously so the tree is rebuilt in the same
+invocation.
+
 ## Data on external drive
 
 `postgres-data`, `qdrant-data`, `redis-data` PVCs all bind to
