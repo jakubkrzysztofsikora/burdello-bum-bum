@@ -1,0 +1,143 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: burdello
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      imagePullSecrets:
+        - name: forgejo-registry
+      containers:
+        - name: worker
+          image: forgejo.tail5d39b4.ts.net/jakub/burdello-bum-bum:latest
+          command:
+            - celery
+            - -A
+            - backend.pipeline.celery_app.celery_app
+            - worker
+            - -Q
+            - celery
+            - --loglevel=info
+            - --concurrency=2
+          envFrom:
+            - configMapRef:
+                name: burdello-env
+            - secretRef:
+                name: burdello-secrets
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://bbuser:$(DATABASE_PASSWORD)@postgres.burdello.svc.cluster.local:5432/burdello"
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: burdello-secrets
+                  key: LITELLM_API_KEY
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-mining
+  namespace: burdello
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-mining
+  template:
+    metadata:
+      labels:
+        app: celery-mining
+    spec:
+      imagePullSecrets:
+        - name: forgejo-registry
+      containers:
+        - name: worker
+          image: forgejo.tail5d39b4.ts.net/jakub/burdello-bum-bum:latest
+          command:
+            - celery
+            - -A
+            - backend.pipeline.celery_app.celery_app
+            - worker
+            - -Q
+            - mining
+            - --loglevel=info
+            - --concurrency=4
+          envFrom:
+            - configMapRef:
+                name: burdello-env
+            - secretRef:
+                name: burdello-secrets
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://bbuser:$(DATABASE_PASSWORD)@postgres.burdello.svc.cluster.local:5432/burdello"
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: burdello-secrets
+                  key: LITELLM_API_KEY
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-beat
+  namespace: burdello
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-beat
+  template:
+    metadata:
+      labels:
+        app: celery-beat
+    spec:
+      imagePullSecrets:
+        - name: forgejo-registry
+      containers:
+        - name: beat
+          image: forgejo.tail5d39b4.ts.net/jakub/burdello-bum-bum:latest
+          command:
+            - celery
+            - -A
+            - backend.pipeline.celery_app.celery_app
+            - beat
+            - --loglevel=info
+          envFrom:
+            - configMapRef:
+                name: burdello-env
+            - secretRef:
+                name: burdello-secrets
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://bbuser:$(DATABASE_PASSWORD)@postgres.burdello.svc.cluster.local:5432/burdello"
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: burdello-secrets
+                  key: LITELLM_API_KEY
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi

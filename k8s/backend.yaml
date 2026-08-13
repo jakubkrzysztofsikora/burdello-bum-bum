@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: burdello
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      imagePullSecrets:
+        - name: forgejo-registry
+      containers:
+        - name: backend
+          image: forgejo.tail5d39b4.ts.net/jakub/burdello-bum-bum:latest
+          command: ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: burdello-env
+            - secretRef:
+                name: burdello-secrets
+          env:
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: burdello-secrets
+                  key: LITELLM_API_KEY
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://bbuser:$(DATABASE_PASSWORD)@postgres.burdello.svc.cluster.local:5432/burdello"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+        - name: frontend
+          image: forgejo.tail5d39b4.ts.net/jakub/burdello-bum-bum-frontend:latest
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+        - name: ts-funnel
+          image: tailscale/tailscale:stable
+          env:
+            - name: TS_AUTHKEY
+              valueFrom:
+                secretKeyRef:
+                  name: ts-sidecar-auth
+                  key: TS_AUTHKEY
+            - name: TS_HOSTNAME
+              value: burdello
+            - name: TS_USERSPACE
+              value: "true"
+            - name: TS_SERVE_CONFIG
+              value: /config/serve.json
+            - name: TS_STATE_DIR
+              value: /var/lib/tailscale
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/tailscale
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: ts-funnel-config
+        - name: state
+          persistentVolumeClaim:
+            claimName: ts-funnel-state
+        - name: nginx-config
+          configMap:
+            name: frontend-nginx

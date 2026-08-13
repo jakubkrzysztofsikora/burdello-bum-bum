@@ -14,7 +14,7 @@ For each atom, return an object with:
 - kind: One of "tool", "library", "framework", "pattern", "technique",
   "decision", "solved_problem", "pitfall".
 - category_hint: One of "architecture", "testing", "debugging", "devops",
-  "performance", "security", "tooling", "workflow", "integrations",
+  "performance", "cybersecurity", "tooling", "workflow", "integrations",
   "ai_engineering", or empty string when unsure.
 - summary: One sentence describing what it is / why it matters.
 - excerpt: The shortest verbatim span from the transcript that supports

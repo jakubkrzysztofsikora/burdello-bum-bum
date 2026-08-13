@@ -18,6 +18,8 @@ celery_app = Celery(
     backend=_settings.REDIS_URL,
     include=[
         "backend.pipeline.tasks",
+        "backend.knowledge.task",
+        "backend.knowledge.incremental",
     ],
 )
 
@@ -39,5 +41,14 @@ celery_app.conf.update(
     # CPU/memory-bound extract->embed stages stay on the default queue.
     task_routes={
         "backend.pipeline.tasks.mine_task": {"queue": "mining"},
+    },
+    # Periodic KB rebuild. ``kb_cluster_task`` is idempotent (mechanical_key
+    # dedup + stable content slugs), so re-running weekly is safe. Beat
+    # process must be running for these to fire.
+    beat_schedule={
+        "kb-cluster-weekly": {
+            "task": "backend.knowledge.task.kb_cluster_task",
+            "schedule": 7 * 24 * 60 * 60,  # weekly
+        },
     },
 )

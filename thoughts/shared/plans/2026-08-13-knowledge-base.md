@@ -1,6 +1,6 @@
 # Knowledge Base — hierarchical curated KB from transcripts
 
-Status: approved (build), Phase 1 in progress
+Status: build, Phases 1–4 done, Phase 5 in progress
 Date: 2026-08-13
 
 ## Goal
@@ -14,11 +14,28 @@ where it was observed.
 
 - Publish gate: draft by default; >=2 corroborating transcripts auto-publish.
 - Root taxonomy: 10 seed roots (architecture, testing, debugging, devops,
-  performance, security, tooling, workflow, integrations, ai-engineering);
-  discovery builds subtrees below.
+  performance, **cybersecurity**, tooling, workflow, integrations,
+  ai-engineering); discovery builds subtrees below.
 - Entity index: all types — tool, library, framework, pattern, technique,
   concept.
 - Backfill: last 90 days first, then full history.
+
+## Deployment target (revised mid-build)
+
+**k3s homelab cluster** (single node `k3s-cp-1`, VM on Mac-mini host).
+NOT the Mac Studio. The Mac Studio stays the NFS server for the
+external drive (exported over tailnet at `100.116.31.6:/Users/Shared/
+cluster-nfs/pv`).
+
+| Thing | Value |
+|---|---|
+| Cluster | `k3s-cp-1` (Mac-mini host VM) |
+| kubeconfig | `~/cluster-migration/kube/kubeconfig.yaml` |
+| Registry | `forgejo.tail5d39b4.ts.net/jakub/burdello-bum-bum` |
+| StorageClass (data) | **`nfs-studio`** — keeps Postgres / Qdrant / Redis volumes on the external drive over tailnet |
+| Public exposure | Tailscale Funnel sidecar; hostname `burdello` → `https://burdello.tail5d39b4.ts.net` |
+| Namespace | `burdello` |
+| Local docker-compose | Stays for offline dev only; live traffic goes through k3s |
 
 ## Data model (new tables)
 
@@ -102,12 +119,32 @@ where it was observed.
 
 ## Phases
 
-1. Schema + migration (this phase)
-2. Extraction prompt + task
-3. Clustering + hierarchy + draft generation
-4. Frontend
-5. QA + incremental + recluster cron
-6. MCP tools
+1. ✅ Schema + migration — `f4a6ba0`
+2. ✅ Extraction prompt + Celery task — `ce19ce3`
+3. ✅ Clustering + RAPTOR hierarchy + draft generation — `5e8a7d0`
+4. ✅ Frontend tree + node pages + entity index — `d6ca48e`
+5. 🔄 QA two-stage retrieval + incremental assignment + k3s manifests
+6. ⏳ MCP tools (kb_tree, kb_page_read, kb_entity_lookup)
+
+## Phase 5 detail (current)
+
+- **QA two-stage**: `/api/v1/search/qa` first retrieves top KB pages by
+  embedding cosine, then falls through to chunk search. KB pages are
+  surfaced as a separate citation kind so the LLM can ground on curated
+  knowledge rather than raw transcript chunks when available.
+- **Incremental atom assignment**: per-new-transcript. After
+  `knowledge_extract_task` extracts atoms, each is matched against
+  existing `KbNode` rows by cosine — ≥0.87 attach to existing node,
+  0.80–0.87 queue for review, <0.80 spawn new candidate. Reuses the
+  calibrated lustro-style bands.
+- **Periodic recluster**: `kb_cluster_task` already exists. Wire into a
+  Celery beat schedule (weekly). mechanical_key + deterministic slug
+  dedup means re-runs update in place rather than duplicating.
+- **k3s deployment**: `k8s/` directory — namespace, secrets stubs,
+  PVCs on `nfs-studio`, deployments for postgres / qdrant / redis /
+  backend / celery-worker / celery-mining / celery-beat / frontend,
+  ts-funnel sidecar for public exposure. Build/push script for
+  forgejo registry (amd64).
 
 ## Risks
 

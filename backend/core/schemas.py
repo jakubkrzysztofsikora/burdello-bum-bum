@@ -518,12 +518,19 @@ class SearchResponse(BaseModel):
 
 
 class QACitation(BaseModel):
-    """A source chunk cited in a Q&A answer."""
+    """A source chunk or KB page cited in a Q&A answer.
 
-    chunk_id: uuid.UUID
-    transcript_id: uuid.UUID
+    KB-page citations leave ``chunk_id`` and ``transcript_id`` as ``None``
+    and set ``source_type='kb'`` so callers can render different links.
+    """
+
+    chunk_id: uuid.UUID | None = None
+    transcript_id: uuid.UUID | None = None
     text: str
     score: float
+    source_type: str = "chunk"
+    node_slug: str | None = None
+    node_title: str | None = None
 
 
 class QARequest(BaseModel):

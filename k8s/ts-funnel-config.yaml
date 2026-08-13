@@ -1,0 +1,34 @@
+# ts-funnel routes /api/* to backend, everything else to frontend.
+# Subpath mode: when the funnel hostname is e.g. burdello.tail5d39b4.ts.net,
+# the sidecar rewrites /api/* to backend, and serves the SPA bundle on /.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ts-funnel-config
+  namespace: burdello
+data:
+  serve.json: |
+    {
+      "TCP": {"443": {"HTTPS": true}},
+      "Web": {
+        "${TS_CERT_DOMAIN}:443": {
+          "Handlers": {
+            "/api/": {"Proxy": "http://127.0.0.1:8000"},
+            "/": {"Proxy": "http://127.0.0.1:3000"}
+          }
+        }
+      },
+      "AllowFunnel": {"${TS_CERT_DOMAIN}:443": true}
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ts-funnel-state
+  namespace: burdello
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 128Mi

@@ -166,6 +166,7 @@ def process_source(self, source_path: str, provider_hint: str | None = None) -> 
         | chunk_embed_task.s()
         | mine_task.s()
         | knowledge_extract_task.s()
+        | kb_incremental_assign_chain_task.s()
     ).apply_async()
 
     return {
@@ -891,6 +892,34 @@ def knowledge_extract_task(
             "knowledge_extract_task: failed for %s", transcript_id_str
         )
         raise self.retry(exc=exc) from exc
+
+
+# ---------------------------------------------------------------------------
+# KB incremental atom assignment
+# ---------------------------------------------------------------------------
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=30)
+def kb_incremental_assign_chain_task(
+    self, knowledge_result: dict[str, Any]
+) -> dict[str, Any]:
+    """Thin wrapper around ``kb_incremental_assign_task`` for chain wiring.
+
+    Kept as a distinct task so the chain signature stays stable when the
+    underlying implementation evolves. Forwards the knowledge result and
+    its own return value unchanged.
+
+    Args:
+        knowledge_result: Output of ``knowledge_extract_task``.
+
+    Returns:
+        Output of ``kb_incremental_assign_task``.
+    """
+    from backend.knowledge.incremental import kb_incremental_assign_task
+
+    return kb_incremental_assign_task.apply(
+        args=[knowledge_result]
+    ).get()
 
 
 # ---------------------------------------------------------------------------
