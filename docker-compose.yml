@@ -25,7 +25,8 @@ services:
       - bb-network
 
   # ------------------------------------------------------------------
-  # Qdrant vector store
+  # Qdrant forwarder -> Mikrus (100.127.6.70). See deploy/QDRANT-MIKRUS-OPERATIONS.md.
+  # Do not start a local writable Qdrant; the remote copy is authoritative.
   # ------------------------------------------------------------------
   qdrant:
     image: qdrant/qdrant:latest
@@ -36,18 +37,15 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: 6334
-    # Qdrant's image ships no curl/wget; bash supports /dev/tcp for a TCP liveness probe.
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6333/healthz"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: 512m
     networks:
       - bb-network
 
@@ -112,13 +110,15 @@ services:
       - ${HOME}/.vibe:/home/bbuser/.vibe:ro
       - ${HOME}/.gemini:/home/bbuser/.gemini:ro
       - ${HOME}/.openclaw-autoclaw:/home/bbuser/.openclaw-autoclaw:ro
+      - ${HOME}/.pi:/home/bbuser/.pi:ro
+      - ${HOME}/.omp:/home/bbuser/.omp:ro
     environment:
       DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
       QDRANT_URL: "http://qdrant:6333"
       QDRANT_COLLECTION: "burdello_chunks"
       REDIS_URL: "redis://redis:6379/0"
       CELERY_BROKER_URL: "redis://redis:6379/1"
-      LITELLM_URL: "${LITELLM_URL:-http://litellm}"
+      LITELLM_URL: "${LITELLM_URL:-http://host.docker.internal:4000}"
       LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
       BB_LOG_LEVEL: "INFO"
       BB_EMBEDDING_MODEL: "${BB_EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
@@ -126,6 +126,7 @@ services:
       BB_CHUNK_SIZE: "512"
       BB_CHUNK_OVERLAP: "50"
       MCP_BRIDGE_TOKEN: "${MCP_BRIDGE_TOKEN:-}"
+      TODOIST_API_TOKEN: "${TODOIST_API_TOKEN:-}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -137,10 +138,9 @@ services:
       resources:
         limits:
           memory: 2g
-    # litellm is a Tailscale node (100.114.245.86 / litellm.tail5d39b4.ts.net).
-    # Map the bare hostname so LITELLM_URL=http://litellm resolves in-container.
+    # Lets LITELLM_URL=http://host.docker.internal:4000 resolve on Linux too.
     extra_hosts:
-      - "litellm:100.116.31.6"
+      - "host.docker.internal:host-gateway"
     networks:
       - bb-network
     restart: unless-stopped
@@ -156,7 +156,7 @@ services:
     container_name: bb-celery-worker
     command: >
       python -m celery -A backend.pipeline.celery_app worker
-      --loglevel=info
+      --loglevel=warning
       --concurrency=3
       --max-tasks-per-child=100
       --max-memory-per-child=3000000
@@ -170,6 +170,8 @@ services:
       - ${HOME}/.vibe:/home/bbuser/.vibe:ro
       - ${HOME}/.gemini:/home/bbuser/.gemini:ro
       - ${HOME}/.openclaw-autoclaw:/home/bbuser/.openclaw-autoclaw:ro
+      - ${HOME}/.pi:/home/bbuser/.pi:ro
+      - ${HOME}/.omp:/home/bbuser/.omp:ro
     # The image HEALTHCHECK curls :8000 (the API); a worker doesn't serve it.
     healthcheck:
       disable: true
@@ -179,11 +181,11 @@ services:
       QDRANT_COLLECTION: "burdello_chunks"
       REDIS_URL: "redis://redis:6379/0"
       CELERY_BROKER_URL: "redis://redis:6379/1"
-      LITELLM_URL: "${LITELLM_URL:-http://litellm}"
+      LITELLM_URL: "${LITELLM_URL:-http://host.docker.internal:4000}"
       LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
       BB_LOG_LEVEL: "INFO"
       BB_EMBEDDING_MODEL: "${BB_EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
-      BB_MINING_MODEL: "${BB_MINING_MODEL:-claude-haiku-4-5-20251001}"
+      BB_MINING_MODEL: "${BB_MINING_MODEL:-kimi}"
       BB_CHUNK_SIZE: "512"
       BB_CHUNK_OVERLAP: "50"
     depends_on:
@@ -201,9 +203,8 @@ services:
           # 4000m starved them — they thrashed at the cap and throughput
           # collapsed to ~7/90s. 8g gives each child real headroom.
           memory: 8g
-    # litellm is a Tailscale node (100.114.245.86 / litellm.tail5d39b4.ts.net).
     extra_hosts:
-      - "litellm:100.116.31.6"
+      - "host.docker.internal:host-gateway"
     networks:
       - bb-network
     restart: unless-stopped
@@ -222,7 +223,7 @@ services:
     command: >
       python -m celery -A backend.pipeline.celery_app worker
       -Q mining
-      --loglevel=info
+      --loglevel=warning
       --concurrency=4
       --max-tasks-per-child=100
       -n mining@%h
@@ -234,9 +235,11 @@ services:
       DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
       REDIS_URL: "redis://redis:6379/0"
       CELERY_BROKER_URL: "redis://redis:6379/1"
-      LITELLM_URL: "${LITELLM_URL:-http://litellm}"
+      LITELLM_URL: "${LITELLM_URL:-http://host.docker.internal:4000}"
       LITELLM_API_KEY: "${LITELLM_API_KEY:-}"
       BB_LOG_LEVEL: "INFO"
+      BB_EMBEDDING_MODEL: "${BB_EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
+      QDRANT_URL: "http://qdrant:6333"
       BB_MINING_MODEL: "${BB_MINING_MODEL:-kimi}"
     depends_on:
       postgres:
@@ -248,7 +251,7 @@ services:
         limits:
           memory: 1500m
     extra_hosts:
-      - "litellm:100.116.31.6"
+      - "host.docker.internal:host-gateway"
     networks:
       - bb-network
     restart: unless-stopped
@@ -275,6 +278,8 @@ services:
       DATABASE_URL: "postgresql+asyncpg://bbuser:bbpass@postgres:5432/burdello"
       CELERY_BROKER_URL: "redis://redis:6379/1"
       BB_LOG_LEVEL: "INFO"
+      BB_EMBEDDING_MODEL: "${BB_EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}"
+      QDRANT_URL: "http://qdrant:6333"
     depends_on:
       redis:
         condition: service_healthy
@@ -298,6 +303,7 @@ services:
     environment:
       # Vite proxies /api to the backend service over the compose network.
       VITE_API_PROXY: "http://backend:8000"
+      VITE_ALLOWED_HOSTS: "${VITE_ALLOWED_HOSTS:-}"
     ports:
       - "3001:3000"
     volumes:
@@ -315,13 +321,12 @@ services:
     restart: unless-stopped
 
   # ------------------------------------------------------------------
-  # Cloudflare Tunnel — exposes the backend at bb-api.jakub.team so the
-  # Cloudflare Worker (burdello-mcp.jakub.team) can call the bearer-auth
-  # MCP routes. Token comes from the Cloudflare dashboard:
-  #   Zero Trust → Networks → Tunnels → Create tunnel → "Run a connector".
-  # Paste the token into .env as CLOUDFLARE_TUNNEL_TOKEN. Then add a public
-  # hostname `bb-api.jakub.team` → service `http://bb-backend:8000` in the
-  # tunnel's UI.
+  # Cloudflare Tunnel — exposes the backend so the Cloudflare Worker in
+  # worker/ can call the bearer-auth MCP routes from anywhere.
+  # Token: Cloudflare dashboard → Zero Trust → Networks → Tunnels →
+  # Create tunnel → "Run a connector". Paste it into .env as
+  # CLOUDFLARE_TUNNEL_TOKEN, then add a public hostname in the tunnel config
+  # pointing at `http://bb-backend:8000`.
   # Start only when needed: docker compose --profile tunnel up -d cloudflared
   # ------------------------------------------------------------------
   cloudflared:

@@ -24,7 +24,10 @@ RUN python -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 COPY pyproject.toml ./
+# CPU-only torch: PyPI's aarch64 wheel pulls ~5 GB of unused NVIDIA CUDA
+# runtime (no GPU in this VM) and overflowed the build filesystem.
 RUN pip install --upgrade pip && \
+    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -e ".[dev]"
 
 # ---------------------------------------------------------------------------
@@ -47,26 +50,20 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY backend ./backend
 COPY pyproject.toml ./
+COPY alembic.ini ./
 
 # Install the package itself (editable, no deps since they are in venv)
 RUN pip install --no-cache-dir --no-deps -e .
 
-# Bake the embedding model into the image. The host's TLS chain trusts
-# HuggingFace; the container's does not (corp proxy / Cloudflare WARP
-# intercepts huggingface.co). The model is pre-downloaded on the host
-# into ./.hf-cache via:
-#   HF_HOME=$(pwd)/.hf-cache python -c \
-#     "from sentence_transformers import SentenceTransformer; \
-#      SentenceTransformer('sentence-transformers/all-mpnet-base-v2')"
-# Then COPYed here. HF_HUB_OFFLINE=1 disables the revalidation HEAD call
-# that would otherwise still try to reach huggingface.co at runtime.
-ENV HF_HOME=/opt/hf-cache \
-    HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
-COPY .hf-cache /opt/hf-cache
+# Embedding model cache directory. The model downloads from HuggingFace
+# on first run via sentence-transformers (~420 MB). Pre-bake only if your
+# network blocks huggingface.co: build with --build-arg HF_HUB_OFFLINE=1
+# and mount .hf-cache during build.
+ENV HF_HOME=/opt/hf-cache
 
 # Non-root user
 RUN useradd --create-home --shell /bin/bash bbuser && \
+    mkdir -p /opt/hf-cache && \
     chown -R bbuser:bbuser /app /opt/hf-cache
 USER bbuser
 
