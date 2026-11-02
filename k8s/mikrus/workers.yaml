@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: burdello
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k3s-mikrus-1
+      containers:
+        - name: worker
+          image: docker.io/library/burdello-bum-bum:mikrus
+          imagePullPolicy: Never
+          command:
+            - celery
+            - -A
+            - backend.pipeline.celery_app.celery_app
+            - worker
+            - -Q
+            - celery
+            - --loglevel=info
+            - --concurrency=2
+            - --max-tasks-per-child=100
+            - --max-memory-per-child=1200000
+          env:
+            - name: BB_MINING_MODEL
+              value: claude-haiku-4-5-20251001
+            - name: LITELLM_URL
+              value: "http://litellm.tail5d39b4.ts.net"
+
+          envFrom:
+            - configMapRef:
+                name: burdello-env
+            - secretRef:
+                name: burdello-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1536Mi
+            limits:
+              memory: 3Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-mining
+  namespace: burdello
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: celery-mining
+  template:
+    metadata:
+      labels:
+        app: celery-mining
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: k3s-mikrus-1
+      containers:
+        - name: worker
+          image: docker.io/library/burdello-bum-bum:mikrus
+          imagePullPolicy: Never
+          command:
+            - celery
+            - -A
+            - backend.pipeline.celery_app.celery_app
+            - worker
+            - -Q
+            - mining
+            - --loglevel=info
+            - --concurrency=2
+            - --max-tasks-per-child=100
+            - --max-memory-per-child=900000
+          env:
+            - name: BB_MINING_MODEL
+              value: kimi
+            - name: LITELLM_URL
+              value: "http://litellm.tail5d39b4.ts.net"
+
+          envFrom:
+            - configMapRef:
+                name: burdello-env
+            - secretRef:
+                name: burdello-secrets
+          resources:
+            requests:
+              cpu: 300m
+              memory: 1Gi
+            limits:
+              memory: 2560Mi
